@@ -30,7 +30,7 @@ def test_spider_mascot(app):
     called = []
     spider = FloatingSpider(lambda: called.append(True))
     spider.position_initial()
-    assert spider.width() == 88 and spider.height() == 88
+    assert spider.width() == 96 and spider.height() == 96
     # Test game loop tick
     spider._game_loop()
     print("✓ Spider widget initialized and ticked.")

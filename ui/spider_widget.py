@@ -28,8 +28,8 @@ class FloatingSpider(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
 
-        # Mascot dimensions (88x88 provides ample room for articulated legs while remaining neat)
-        self.setFixedSize(88, 88)
+        # Mascot dimensions (96x96 provides ample room for articulated legs while remaining neat)
+        self.setFixedSize(96, 96)
 
         # Crawling & Behavior State
         self.state = 'IDLE'           # 'IDLE', 'TURNING', 'CRAWLING', 'DRAGGING'
@@ -301,151 +301,212 @@ class FloatingSpider(QWidget):
         display_angle = math.degrees(self.heading_angle) + 90.0
         painter.rotate(display_angle)
 
-        # Draw subtle soft ground shadow
-        shadow_path = QPainterPath()
-        shadow_path.addEllipse(QPointF(0, 4), 26, 30)
-        painter.fillPath(shadow_path, QColor(0, 0, 0, 75))
+        # (Ground shadow removed completely as requested by user)
 
-        # 8 Articulated Legs Definitions (Anatomy from concept sketch)
-        # 4 on Left (x < 0), 4 on Right (x > 0)
-        # Legs: 0:L1, 1:L2, 2:L3, 3:L4, 4:R1, 5:R2, 6:R3, 7:R4
-        # Base attach angles, segment lengths, joint resting bends
-        leg_configs = [
-            # side, attach_y, base_angle, len1, len2, len3, gait_group
-            (-1, -6, -65, 12, 14, 16, 0), # L1 front-reaching
-            (-1, -2, -25, 13, 14, 15, 1), # L2 mid-front
-            (-1,  3,  25, 13, 13, 14, 0), # L3 mid-rear
-            (-1,  8,  65, 14, 16, 18, 1), # L4 rear-reaching
-            ( 1, -6, -65, 12, 14, 16, 1), # R1 front-reaching
-            ( 1, -2, -25, 13, 14, 15, 0), # R2 mid-front
-            ( 1,  3,  25, 13, 13, 14, 1), # R3 mid-rear
-            ( 1,  8,  65, 14, 16, 18, 0), # R4 rear-reaching
+        # Base resting leg coordinates relative to spider center (0,0)
+        # Inspired directly by the user's anatomical blueprint and silhouette
+        leg_templates = [
+            # Pair 1: Front reaching high & inward (Leg 1)
+            {
+                'side': -1,
+                'att': (-4.5, -7.0),
+                'knee1': (-12.0, -18.0),
+                'knee2': (-13.0, -29.0),
+                'tip': (-6.5, -38.0),
+                'gait_grp': 0
+            },
+            # Pair 2: Front-lateral reaching out & forward (Leg 2)
+            {
+                'side': -1,
+                'att': (-6.5, -4.5),
+                'knee1': (-18.0, -12.0),
+                'knee2': (-26.0, -16.0),
+                'tip': (-24.0, -3.0),
+                'gait_grp': 1
+            },
+            # Pair 3: Lateral-rear reaching out & backward (Leg 3)
+            {
+                'side': -1,
+                'att': (-6.8, -1.0),
+                'knee1': (-19.0, 3.0),
+                'knee2': (-27.0, 10.0),
+                'tip': (-21.0, 24.0),
+                'gait_grp': 0
+            },
+            # Pair 4: Rear reaching far back & curving inward (Leg 4)
+            {
+                'side': -1,
+                'att': (-5.0, 2.5),
+                'knee1': (-14.0, 13.0),
+                'knee2': (-17.0, 27.0),
+                'tip': (-7.5, 38.0),
+                'gait_grp': 1
+            },
         ]
 
-        # Draw 8 Articulated Legs
-        for side, att_y, base_deg, l1, l2, l3, gait_grp in leg_configs:
-            # Calculate gait cycle swing
+        # Generate both sides symmetrically
+        all_legs = []
+        for l in leg_templates:
+            all_legs.append(l) # Left
+            r = {
+                'side': 1,
+                'att': (-l['att'][0], l['att'][1]),
+                'knee1': (-l['knee1'][0], l['knee1'][1]),
+                'knee2': (-l['knee2'][0], l['knee2'][1]),
+                'tip': (-l['tip'][0], l['tip'][1]),
+                'gait_grp': 1 - l['gait_grp']
+            }
+            all_legs.append(r)
+
+        chitin_base = QColor(16, 18, 28)
+        chitin_highlight = QColor(36, 42, 68)
+        chitin_tip = QColor(50, 60, 95)
+
+        # 1. DRAW 8 ARTICULATED LEGS
+        for leg in all_legs:
+            side = leg['side']
+            att_x, att_y = leg['att']
+            k1_x, k1_y = leg['knee1']
+            k2_x, k2_y = leg['knee2']
+            tip_x, tip_y = leg['tip']
+
+            # Gait & interaction offsets
             if self._is_dragging:
-                # Dangle/wiggle when picked up
-                wiggle = math.sin(self.drag_wiggle + side * 1.5 + att_y) * 12.0
-                swing_deg = wiggle
-                knee_lift = -2.0 + math.cos(self.drag_wiggle * 1.5) * 3.0
+                wiggle = math.sin(self.drag_wiggle + side * 1.5 + att_y) * 4.0
+                k1_x += side * math.cos(self.drag_wiggle) * 1.5
+                k2_x += side * math.sin(self.drag_wiggle) * 2.0
+                tip_x += side * math.cos(self.drag_wiggle * 1.3) * 2.5
+                tip_y += wiggle
             elif self.state == 'CRAWLING':
-                # Alternating tetrapod gait
-                phase_offset = 0.0 if gait_grp == 0 else math.pi
-                swing_deg = math.sin(self.walk_phase + phase_offset) * 14.0
-                knee_lift = max(0.0, math.sin(self.walk_phase + phase_offset)) * 4.0
+                phase_offset = 0.0 if leg['gait_grp'] == 0 else math.pi
+                swing = math.sin(self.walk_phase + phase_offset)
+                lift = max(0.0, math.sin(self.walk_phase + phase_offset))
+
+                swing_dx = -side * swing * 3.5
+                swing_dy = -swing * 4.0
+
+                lift_dy = -lift * 4.0
+                lift_dx = side * lift * 2.0
+
+                k1_x += lift_dx * 0.5
+                k1_y += lift_dy * 0.5
+                k2_x += lift_dx + swing_dx * 0.5
+                k2_y += lift_dy + swing_dy * 0.5
+                tip_x += swing_dx
+                tip_y += swing_dy
             else:
-                # Idle subtle micro-settle
-                swing_deg = math.sin(self.breathe_phase * 0.5 + att_y) * 1.5
-                knee_lift = 0.0
+                idle_shift = math.sin(self.breathe_phase * 0.7 + att_y) * 0.8
+                tip_x += side * idle_shift * 0.3
+                tip_y += idle_shift * 0.5
 
-            # Attach point on cephalothorax edge
-            root_x = side * 8.0
-            root_y = att_y
+            # Segment 1: Coxa -> Knee 1 (Femur)
+            p1 = QPainterPath()
+            p1.moveTo(att_x, att_y)
+            p1.quadTo((att_x + k1_x) / 2.0 + side * 1.5, (att_y + k1_y) / 2.0, k1_x, k1_y)
+            pen1 = QPen(chitin_base, 3.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen1)
+            painter.drawPath(p1)
 
-            eff_deg = base_deg + swing_deg
-            rad = math.radians(eff_deg)
+            pen1_h = QPen(chitin_highlight, 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen1_h)
+            painter.drawPath(p1)
 
-            # Segment 1 (Coxa / Femur)
-            j1_x = root_x + side * (math.cos(rad) * l1)
-            j1_y = root_y + math.sin(rad) * l1 - knee_lift
+            # Segment 2: Knee 1 -> Knee 2 (Tibia)
+            p2 = QPainterPath()
+            p2.moveTo(k1_x, k1_y)
+            p2.quadTo((k1_x + k2_x) / 2.0 + side * 1.0, (k1_y + k2_y) / 2.0, k2_x, k2_y)
+            pen2 = QPen(chitin_base, 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen2)
+            painter.drawPath(p2)
 
-            # Segment 2 (Tibia - bends outwards and down)
-            knee_angle = rad + math.radians(25 if side < 0 else -25)
-            j2_x = j1_x + side * (math.cos(knee_angle) * l2)
-            j2_y = j1_y + math.sin(knee_angle) * l2 + (2.0 if att_y > 0 else -1.0)
+            pen2_h = QPen(chitin_highlight, 1.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen2_h)
+            painter.drawPath(p2)
 
-            # Segment 3 (Metatarsus / Tarsus tip - claw reaching ground)
-            claw_angle = knee_angle + math.radians(35 if side < 0 else -35)
-            tip_x = j2_x + side * (math.cos(claw_angle) * l3)
-            tip_y = j2_y + math.sin(claw_angle) * l3 + (6.0 if att_y > 0 else 2.0)
+            # Segment 3: Knee 2 -> Claw Tip (Tarsus - tapering down to sharp claw)
+            p3 = QPainterPath()
+            p3.moveTo(k2_x, k2_y)
+            p3.quadTo((k2_x + tip_x) / 2.0, (k2_y + tip_y) / 2.0, tip_x, tip_y)
+            pen3 = QPen(chitin_base, 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen3)
+            painter.drawPath(p3)
 
-            # Draw leg segments with chitin shading & joints
-            leg_pen = QPen(QColor(18, 22, 38), 2.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
-            painter.setPen(leg_pen)
-            painter.drawLine(QPointF(root_x, root_y), QPointF(j1_x, j1_y))
+            pen3_tip = QPen(chitin_tip, 1.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen3_tip)
+            painter.drawPath(p3)
 
-            leg_pen2 = QPen(QColor(30, 36, 60), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
-            painter.setPen(leg_pen2)
-            painter.drawLine(QPointF(j1_x, j1_y), QPointF(j2_x, j2_y))
+        # 2. DRAW ABDOMEN (Opisthosoma) - Behind cephalothorax
+        ab_y = 12.0
+        ab_rx = 11.5
+        ab_ry = 14.5 + math.sin(self.breathe_phase * 0.6) * 0.4
 
-            leg_pen3 = QPen(QColor(55, 65, 95), 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
-            painter.setPen(leg_pen3)
-            painter.drawLine(QPointF(j2_x, j2_y), QPointF(tip_x, tip_y))
+        ab_path = QPainterPath()
+        ab_path.addEllipse(QPointF(0, ab_y), ab_rx, ab_ry)
 
-            # Joint highlight knurl
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(99, 102, 241, 160)) # subtle indigo joint dot
-            painter.drawEllipse(QPointF(j1_x, j1_y), 1.6, 1.6)
-            painter.drawEllipse(QPointF(j2_x, j2_y), 1.3, 1.3)
+        ab_grad = QRadialGradient(-2.5, ab_y - 4.0, 16.0)
+        ab_grad.setColorAt(0.0, QColor(36, 42, 68))     # Deep navy-indigo highlight
+        ab_grad.setColorAt(0.55, QColor(18, 22, 36))    # Sleek dark chitin
+        ab_grad.setColorAt(1.0, QColor(9, 11, 18))      # Near obsidian rim
 
-        # Abdomen (Opisthosoma) - Posterior plump body
-        ab_y = 13.0
-        ab_w = 21.0
-        ab_h = 27.0 + math.sin(self.breathe_phase) * 0.8 # subtle breathing pulse
-
-        ab_grad = QRadialGradient(-2.0, ab_y - 4.0, ab_h)
-        ab_grad.setColorAt(0.0, QColor(40, 48, 76))
-        ab_grad.setColorAt(0.5, QColor(22, 26, 44))
-        ab_grad.setColorAt(1.0, QColor(10, 12, 20))
-
-        painter.setPen(QPen(QColor(99, 102, 241, 90), 1.2)) # Sleek indigo rim
+        painter.setPen(QPen(QColor(99, 102, 241, 110), 1.2)) # Subtle sleek indigo rim
         painter.setBrush(ab_grad)
-        painter.drawEllipse(QPointF(0, ab_y), ab_w / 2.0, ab_h / 2.0)
+        painter.drawPath(ab_path)
 
-        # Abdomen decorative dorsal markings (Okum bio-luminescent chevron)
+        # Subtle dorsal specular gleam on abdomen (gives 3D curvature)
+        gleam_path = QPainterPath()
+        gleam_path.addEllipse(QPointF(-2.0, ab_y - 5.0), 4.5, 6.0)
+        gleam_grad = QRadialGradient(-2.0, ab_y - 5.0, 6.0)
+        gleam_grad.setColorAt(0.0, QColor(129, 140, 248, 50))
+        gleam_grad.setColorAt(1.0, QColor(129, 140, 248, 0))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(99, 102, 241, 80))
-        painter.drawEllipse(QPointF(0, ab_y - 2), 3.0, 5.0)
-        painter.setBrush(QColor(56, 189, 248, 120)) # Small cyan core
-        painter.drawEllipse(QPointF(0, ab_y + 4), 2.0, 3.0)
+        painter.setBrush(gleam_grad)
+        painter.drawPath(gleam_path)
 
-        # Cephalothorax (Prosoma) - Head & chest
+        # 3. DRAW CEPHALOTHORAX (Prosoma / Head-Chest Hub)
         ceph_y = -3.0
-        ceph_w = 17.0
-        ceph_h = 16.0
+        ceph_rx = 8.5
+        ceph_ry = 8.0
 
-        # Head tilt angle
         painter.save()
         painter.translate(0, ceph_y)
         painter.rotate(math.degrees(self.head_tilt))
 
-        ceph_grad = QRadialGradient(-1.0, -3.0, 12.0)
-        ceph_grad.setColorAt(0.0, QColor(48, 56, 88))
-        ceph_grad.setColorAt(0.6, QColor(24, 28, 48))
-        ceph_grad.setColorAt(1.0, QColor(12, 14, 24))
+        ceph_path = QPainterPath()
+        ceph_path.addEllipse(QPointF(0, 0), ceph_rx, ceph_ry)
 
-        painter.setPen(QPen(QColor(99, 102, 241, 120), 1.2))
+        ceph_grad = QRadialGradient(-1.5, -2.5, 11.0)
+        ceph_grad.setColorAt(0.0, QColor(42, 50, 80))
+        ceph_grad.setColorAt(0.65, QColor(20, 24, 38))
+        ceph_grad.setColorAt(1.0, QColor(10, 12, 20))
+
+        painter.setPen(QPen(QColor(99, 102, 241, 130), 1.2))
         painter.setBrush(ceph_grad)
-        painter.drawEllipse(QPointF(0, 0), ceph_w / 2.0, ceph_h / 2.0)
+        painter.drawPath(ceph_path)
 
-        # Pedipalps (front feelers)
-        pp_swing = math.sin(self.pedipalp_phase) * 3.0
-        painter.setPen(QPen(QColor(30, 36, 60), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        painter.drawLine(QPointF(-3.0, -7.0), QPointF(-5.0, -13.0 + pp_swing))
-        painter.drawLine(QPointF(-5.0, -13.0 + pp_swing), QPointF(-3.5, -16.0 + pp_swing))
-        painter.drawLine(QPointF(3.0, -7.0), QPointF(5.0, -13.0 - pp_swing))
-        painter.drawLine(QPointF(5.0, -13.0 - pp_swing), QPointF(3.5, -16.0 - pp_swing))
+        # Pedipalps (front feelers/arms reaching forward)
+        pp_anim = math.sin(self.pedipalp_phase * 1.5) * 2.0 if self.state == 'CRAWLING' else math.sin(self.pedipalp_phase * 0.8) * 1.2
+        painter.setPen(QPen(chitin_base, 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(QPointF(-2.5, -5.0), QPointF(-4.5, -10.0 + pp_anim))
+        painter.drawLine(QPointF(-4.5, -10.0 + pp_anim), QPointF(-3.0, -13.0 + pp_anim))
+        painter.drawLine(QPointF(2.5, -5.0), QPointF(4.5, -10.0 - pp_anim))
+        painter.drawLine(QPointF(4.5, -10.0 - pp_anim), QPointF(3.0, -13.0 - pp_anim))
 
-        # Cute Spider Eyes (Cluster: 2 large cute glowing eyes + 4 small perimeter eyes)
-        # 1. Main Large Eyes (Glowing Cyan / Electric Blue with white catchlight reflection)
+        # 4. CUTE JUMPING SPIDER EYES
+        # Pair 1: Primary Large Center Eyes (Electric Blue/Cyan with shiny reflection)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(56, 189, 248)) # Vivid Cyan
-        painter.drawEllipse(QPointF(-2.8, -5.0), 2.0, 2.0)
-        painter.drawEllipse(QPointF(2.8, -5.0), 2.0, 2.0)
+        painter.drawEllipse(QPointF(-2.5, -3.8), 2.2, 2.2)
+        painter.drawEllipse(QPointF(2.5, -3.8), 2.2, 2.2)
 
-        # White glint reflection (makes them look cute and alive!)
-        painter.setBrush(QColor(255, 255, 255, 230))
-        painter.drawEllipse(QPointF(-2.2, -5.6), 0.7, 0.7)
-        painter.drawEllipse(QPointF(3.4, -5.6), 0.7, 0.7)
+        # Large eye shiny specular catchlight (makes them look adorable & alive)
+        painter.setBrush(QColor(255, 255, 255, 240))
+        painter.drawEllipse(QPointF(-1.8, -4.4), 0.8, 0.8)
+        painter.drawEllipse(QPointF(3.2, -4.4), 0.8, 0.8)
 
-        # 2. Secondary Lateral Eyes (Small glowing dots)
-        painter.setBrush(QColor(165, 180, 252, 190)) # Soft Lavender
-        painter.drawEllipse(QPointF(-5.2, -4.0), 1.1, 1.1)
-        painter.drawEllipse(QPointF(5.2, -4.0), 1.1, 1.1)
-        painter.drawEllipse(QPointF(-4.5, -6.5), 0.9, 0.9)
-        painter.drawEllipse(QPointF(4.5, -6.5), 0.9, 0.9)
+        # Pair 2: Lateral Secondary Eyes (Small soft glowing dots)
+        painter.setBrush(QColor(165, 180, 252, 200)) # Lavender
+        painter.drawEllipse(QPointF(-5.5, -2.5), 1.2, 1.2)
+        painter.drawEllipse(QPointF(5.5, -2.5), 1.2, 1.2)
 
         painter.restore() # Cephalothorax
         painter.restore() # Global translated & rotated
