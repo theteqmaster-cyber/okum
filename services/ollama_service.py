@@ -1,16 +1,19 @@
 """
-Compatibility layer for ollama_service.
-Delegates to unified services.ai_service which supports both Local (Ollama) and Online (Groq).
+Compatibility shim for ollama_service.
+Ollama has been retired in favor of Groq Cloud AI.
 """
 from services.ai_service import (
-    OLLAMA_HOST,
-    DEFAULT_LOCAL_MODEL as DEFAULT_MODEL,
     preload_model,
     unload_model,
     is_ollama_running,
     AIQueryWorker,
     OllamaQueryWorker,
-    get_groq_api_key,
-    load_env
 )
 
+__all__ = [
+    'preload_model',
+    'unload_model',
+    'is_ollama_running',
+    'AIQueryWorker',
+    'OllamaQueryWorker',
+]

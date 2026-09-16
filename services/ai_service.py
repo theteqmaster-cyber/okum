@@ -2,7 +2,6 @@ import os
 import json
 import urllib.request
 import urllib.error
-import threading
 from PyQt6.QtCore import QThread, pyqtSignal
 
 # --- ENV LOADER (Zero-dependency .env parser) ---
@@ -29,116 +28,56 @@ def load_env(env_path=None):
 # Load env on module import
 load_env()
 
-# Constants & Defaults
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-DEFAULT_LOCAL_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:1.5b")
-
+# Groq Cloud API configuration
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_GROQ_MODEL = os.environ.get("GROQ_MODEL", "groq/compound")
+DEFAULT_GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 def get_groq_api_key():
     load_env()
     return os.environ.get("GROQ_API_KEY", "").strip()
 
-def preload_model(model=DEFAULT_LOCAL_MODEL):
-    """Sends a background warmup request to load the local Ollama model into memory."""
-    def _warmup():
-        try:
-            url = f"{OLLAMA_HOST}/api/generate"
-            payload = json.dumps({
-                "model": model,
-                "prompt": "",
-                "stream": False,
-                "keep_alive": "24h"
-            }).encode('utf-8')
-            req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
-            with urllib.request.urlopen(req, timeout=10) as _:
-                pass
-        except Exception:
-            pass
+# Compatibility stubs for retired Ollama provider
+def preload_model(model=None):
+    """No-op stub (Ollama removed in favor of Groq)."""
+    pass
 
-    thread = threading.Thread(target=_warmup, daemon=True)
-    thread.start()
-
-def unload_model(model=DEFAULT_LOCAL_MODEL):
-    """Sends an immediate unload request to Ollama to free system memory."""
-    try:
-        url = f"{OLLAMA_HOST}/api/generate"
-        payload = json.dumps({
-            "model": model,
-            "keep_alive": 0
-        }).encode('utf-8')
-        req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=3) as _:
-            pass
-    except Exception:
-        pass
+def unload_model(model=None):
+    """No-op stub (Ollama removed in favor of Groq)."""
+    pass
 
 def is_ollama_running():
-    try:
-        url = f"{OLLAMA_HOST}/api/tags"
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=2) as response:
-            return response.status == 200
-    except Exception:
-        return False
+    """Returns False as Ollama has been retired."""
+    return False
 
 class AIQueryWorker(QThread):
     """
-    Unified AI query worker supporting both:
-    1. 'local' / 'ollama' - Local Ollama LLM
-    2. 'groq' / 'online'  - Online Groq Cloud LLM (llama-3.3-70b-versatile)
+    Dedicated AI query worker running asynchronously against Groq Cloud API.
+    Provides fast, streaming-capable intelligence via Groq LLM.
     """
     response_ready = pyqtSignal(str, str, str)  # (response_text, session_id, prompt)
     error_occurred = pyqtSignal(str, str)       # (error_message, session_id)
 
-    def __init__(self, prompt, session_id, provider="local", model=None, system_prompt=None):
+    def __init__(self, prompt, session_id, provider="groq", model=None, system_prompt=None):
         super().__init__()
         self.prompt = prompt
         self.session_id = session_id
-        self.provider = (provider or "local").lower().strip()
-        self.system_prompt = system_prompt or "You are Okum, a helpful, friendly, smart, and direct AI assistant for Linux. Keep answers clear, insightful, accurate, and concise."
-        
-        if self.provider in ("groq", "online"):
-            self.model = model or DEFAULT_GROQ_MODEL
-        else:
-            self.model = model or DEFAULT_LOCAL_MODEL
+        self.provider = "groq"
+        self.system_prompt = system_prompt or (
+            "You are Okum, a helpful, friendly, smart, and direct AI assistant for Linux desktop. "
+            "Keep answers clear, insightful, accurate, and concise."
+        )
+        self.model = model or os.environ.get("GROQ_MODEL") or DEFAULT_GROQ_MODEL
 
     def run(self):
-        if self.provider in ("groq", "online"):
-            self._run_groq()
-        else:
-            self._run_ollama()
-
-    def _run_ollama(self):
-        try:
-            url = f"{OLLAMA_HOST}/api/generate"
-            payload_data = {
-                "model": self.model,
-                "prompt": self.prompt,
-                "system": self.system_prompt,
-                "stream": False,
-                "keep_alive": "24h"
-            }
-            payload = json.dumps(payload_data).encode('utf-8')
-            req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
-
-            with urllib.request.urlopen(req, timeout=90) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                answer = result.get('response', '').strip()
-                self.response_ready.emit(answer, self.session_id, self.prompt)
-        except urllib.error.URLError as e:
-            self.error_occurred.emit(
-                f"Could not connect to Local Ollama ({str(e.reason)}).\nMake sure Ollama is running (`ollama serve`), or switch to Online AI (Groq) from the dropdown above.",
-                self.session_id
-            )
-        except Exception as e:
-            self.error_occurred.emit(f"Local AI error: {str(e)}", self.session_id)
+        self._run_groq()
 
     def _run_groq(self):
         api_key = get_groq_api_key()
         if not api_key:
-            self.error_occurred.emit("Groq API key not found in .env. Please configure GROQ_API_KEY.", self.session_id)
+            self.error_occurred.emit(
+                "Groq API key not found in .env. Please configure GROQ_API_KEY with your key from console.groq.com.",
+                self.session_id
+            )
             return
 
         try:
@@ -155,7 +94,7 @@ class AIQueryWorker(QThread):
             headers = {
                 'Content-Type': 'application/json',
                 'Authorization': f'Bearer {api_key}',
-                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Okum/1.0'
+                'User-Agent': 'Okum-Desktop-Assistant/2.0'
             }
             req = urllib.request.Request(GROQ_API_URL, data=payload, headers=headers)
 
@@ -176,17 +115,20 @@ class AIQueryWorker(QThread):
                     err_body = parsed_err
             except Exception:
                 pass
-            
+
             if e.code == 401:
-                self.error_occurred.emit("Groq Authentication Failed: Invalid API Key in .env", self.session_id)
+                self.error_occurred.emit("Groq Authentication Failed: Invalid GROQ_API_KEY in .env.", self.session_id)
             elif e.code == 429:
-                self.error_occurred.emit("Groq Rate Limit Reached: Please wait a moment before trying again.", self.session_id)
+                self.error_occurred.emit("Groq Rate Limit Reached: Please wait a moment before sending another query.", self.session_id)
             else:
                 self.error_occurred.emit(f"Groq API HTTP {e.code}: {err_body or e.reason}", self.session_id)
         except urllib.error.URLError as e:
-            self.error_occurred.emit(f"Network error reaching Groq Cloud ({str(e.reason)}). Please check your internet connection.", self.session_id)
+            self.error_occurred.emit(
+                f"Network error reaching Groq Cloud ({str(e.reason)}). Please check your internet connection/proxy.",
+                self.session_id
+            )
         except Exception as e:
-            self.error_occurred.emit(f"Online AI error: {str(e)}", self.session_id)
+            self.error_occurred.emit(f"Groq AI error: {str(e)}", self.session_id)
 
 # Backward-compatibility alias
 OllamaQueryWorker = AIQueryWorker

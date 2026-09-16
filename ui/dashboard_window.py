@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QTextEdit, QPushButton, QListWidget, QListWidgetItem,
     QStackedWidget, QComboBox, QFrame, QFileDialog, QMessageBox
 )
-from services.ai_service import AIQueryWorker, OllamaQueryWorker, is_ollama_running
+from services.ai_service import AIQueryWorker
 from ui.quick_window import format_chat_text
 
 def create_dash_svg_icon(svg_inner, stroke_color='#f3f4f6', fill_color='none', size=16, stroke_width=2):
@@ -208,8 +208,8 @@ class DashboardWindow(QMainWindow):
         thread_header.addWidget(lbl_engine)
 
         self.combo_dash_ai = QComboBox(self)
-        self.combo_dash_ai.addItem("⚡ Local (qwen2.5:1.5b)", "local")
-        self.combo_dash_ai.addItem("🌐 Online (Groq Cloud)", "groq")
+        self.combo_dash_ai.addItem("⚡ Groq Cloud AI (llama-3.3-70b-versatile)", "groq")
+        self.combo_dash_ai.addItem("⚡ Groq Cloud AI (groq/compound)", "groq_compound")
         self.combo_dash_ai.setStyleSheet("""
             QComboBox {
                 background: rgba(22, 27, 46, 0.9);
@@ -469,12 +469,8 @@ class DashboardWindow(QMainWindow):
             self._load_chat_sessions()
 
     def _on_dash_ai_changed(self, index):
-        provider = self.combo_dash_ai.currentData() or "local"
-        self.db.set_setting('ai_provider', provider)
-        if provider == "groq":
-            self.txt_dash_prompt.setPlaceholderText("Continue asking Okum (Groq llama-3.3-70b)...")
-        else:
-            self.txt_dash_prompt.setPlaceholderText("Continue asking Okum (qwen2.5:1.5b)...")
+        self.db.set_setting('ai_provider', 'groq')
+        self.txt_dash_prompt.setPlaceholderText("Continue asking Okum (Groq llama-3.3-70b)...")
 
     def _send_dash_question(self):
         prompt = self.txt_dash_prompt.text().strip()
@@ -485,11 +481,8 @@ class DashboardWindow(QMainWindow):
         self._append_dash_bubble("user", prompt)
         self.db.save_chat_message(self.selected_session_id, "user", prompt)
 
-        provider = self.combo_dash_ai.currentData() or "local"
-        if provider == "groq":
-            self.lbl_dash_thinking.setText("Querying Groq Cloud (llama-3.3-70b)...")
-        else:
-            self.lbl_dash_thinking.setText("Okum is thinking locally (qwen2.5:1.5b)...")
+        provider = "groq"
+        self.lbl_dash_thinking.setText("Querying Groq Cloud (llama-3.3-70b)...")
         self.lbl_dash_thinking.show()
         self.txt_dash_prompt.setEnabled(False)
         self.btn_dash_send.setEnabled(False)
