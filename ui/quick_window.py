@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QScrollArea, QListWidget, QListWidgetItem, QSlider, QComboBox
 )
 
-from services.ai_service import AIQueryWorker, OllamaQueryWorker, is_ollama_running
+from services.ai_service import AIQueryWorker
 from services.music_service import MusicService, format_time_ms
 from ui.board_window import OkumBoardManager
 
@@ -105,11 +105,25 @@ class QuickWindow(QWidget):
         self._dragging = False
         self._drag_position = QPoint()
 
+        # Note auto-save timer (debounced 600ms while typing)
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.setSingleShot(True)
+        self.autosave_timer.setInterval(600)
+        self.autosave_timer.timeout.connect(self._perform_autosave)
+
         self._init_ui()
         self._init_ai_provider()
         self._load_active_chat_session()
         self._bind_music_signals()
         self._load_music_library()
+
+    def hideEvent(self, event):
+        self._flush_autosave()
+        super().hideEvent(event)
+
+    def closeEvent(self, event):
+        self._flush_autosave()
+        super().closeEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -256,7 +270,7 @@ class QuickWindow(QWidget):
         self.txt_title = QLineEdit(self)
         self.txt_title.setObjectName("noteTitle")
         self.txt_title.setPlaceholderText("Title or quick thought...")
-        self.txt_title.textChanged.connect(self._update_note_status)
+        self.txt_title.textChanged.connect(self._on_note_content_changed)
         note_layout.addWidget(self.txt_title)
 
         cat_layout = QHBoxLayout()
@@ -295,7 +309,7 @@ class QuickWindow(QWidget):
         self.txt_content = QTextEdit(self.page_note)
         self.txt_content.setObjectName("noteContent")
         self.txt_content.setPlaceholderText("Type your note here...")
-        self.txt_content.textChanged.connect(self._update_note_status)
+        self.txt_content.textChanged.connect(self._on_note_content_changed)
         self.note_body_stack.addWidget(self.txt_content)
 
         # Body Stack 1: Recent Notes View (Search + List)
@@ -390,8 +404,8 @@ class QuickWindow(QWidget):
         engine_row.addWidget(lbl_engine_tag)
 
         self.combo_ai_provider = QComboBox(self.page_ask)
-        self.combo_ai_provider.addItem("⚡ Local AI (Ollama • qwen2.5:1.5b)", "local")
-        self.combo_ai_provider.addItem("🌐 Online AI (Groq • Cloud Fast)", "groq")
+        self.combo_ai_provider.addItem("⚡ Groq Cloud AI (llama-3.3-70b-versatile)", "groq")
+        self.combo_ai_provider.addItem("⚡ Groq Cloud AI (groq/compound)", "groq_compound")
         self.combo_ai_provider.setStyleSheet("""
             QComboBox {
                 background-color: rgba(22, 27, 46, 0.85);
@@ -671,6 +685,7 @@ class QuickWindow(QWidget):
         main_layout.addWidget(self.view_stack)
 
     def _switch_tab(self, index):
+        self._flush_autosave()
         self.view_stack.setCurrentIndex(index)
         if index == 2:
             self._load_music_library()
@@ -682,14 +697,18 @@ class QuickWindow(QWidget):
         x = orb_pos.x() - 410
         y = orb_pos.y() - 250
         if x < 10:
-            x = orb_pos.x() + 74
+            x = orb_pos.x() + 94
         if y < 10:
             y = 10
         self.move(x, y)
 
+    def position_near_spider(self, spider_pos):
+        self.position_near_orb(spider_pos)
+
     # Note logic
     def _on_category_button_clicked(self, cat):
         if cat == "Recent":
+            self._flush_autosave()
             self.txt_title.hide()
             self.note_body_stack.setCurrentIndex(1)
             self._load_recent_notes()
@@ -697,16 +716,16 @@ class QuickWindow(QWidget):
             self.txt_title.show()
             self.current_category = cat
             self.note_body_stack.setCurrentIndex(0)
-            self._update_note_status()
+            self._on_note_content_changed()
 
     def _set_category(self, cat):
         self.txt_title.show()
         self.current_category = cat
-        self._update_note_status()
+        self._on_note_content_changed()
 
     def _toggle_pin(self, checked):
         self.is_pinned = checked
-        self._update_note_status()
+        self._on_note_content_changed()
 
     def _load_recent_notes(self):
         query = self.txt_recent_search.text().strip()
@@ -798,7 +817,28 @@ class QuickWindow(QWidget):
                 self.lbl_save_dot.setStyleSheet("color: #10b981; font-size: 13px; font-weight: bold;")
                 self.lbl_save_dot.setToolTip("Note Saved")
 
+    def _on_note_content_changed(self):
+        self._update_note_status()
+        title = self.txt_title.text().strip()
+        content = self.txt_content.toPlainText().strip()
+        if title or content:
+            # Debounced auto-save triggers 600ms after user stops typing
+            self.autosave_timer.start(600)
+
+    def _perform_autosave(self):
+        title = self.txt_title.text().strip()
+        content = self.txt_content.toPlainText().strip()
+        if not title and not content:
+            return
+        self.save_note()
+
+    def _flush_autosave(self):
+        if hasattr(self, 'autosave_timer') and self.autosave_timer.isActive():
+            self.autosave_timer.stop()
+            self._perform_autosave()
+
     def new_note(self):
+        self._flush_autosave()
         self.current_note_id = None
         self.current_category = "General"
         self.is_pinned = False
@@ -821,6 +861,7 @@ class QuickWindow(QWidget):
         self.txt_title.setFocus()
 
     def load_note(self, note_id):
+        self._flush_autosave()
         note = self.db.get_note(note_id)
         if not note:
             return
@@ -855,6 +896,9 @@ class QuickWindow(QWidget):
         self._update_note_status()
 
     def save_note(self):
+        if hasattr(self, 'autosave_timer') and self.autosave_timer.isActive():
+            self.autosave_timer.stop()
+
         title = self.txt_title.text().strip()
         content = self.txt_content.toPlainText().strip()
         if not title and not content:
@@ -878,24 +922,15 @@ class QuickWindow(QWidget):
 
     # Chat / Ask Okum logic
     def _init_ai_provider(self):
-        saved = self.db.get_setting('ai_provider', 'local')
-        idx = self.combo_ai_provider.findData(saved)
-        if idx >= 0:
-            self.combo_ai_provider.setCurrentIndex(idx)
-        self._update_brain_header_indicator(saved)
+        self.db.set_setting('ai_provider', 'groq')
+        self._update_brain_header_indicator('groq')
 
     def _on_ai_provider_changed(self, index):
-        provider = self.combo_ai_provider.currentData() or "local"
-        self.db.set_setting('ai_provider', provider)
-        self._update_brain_header_indicator(provider)
+        self._update_brain_header_indicator('groq')
 
-    def _update_brain_header_indicator(self, provider):
-        if provider == "groq":
-            self.lbl_sub.setText("● Brain: Groq (Cloud Fast)")
-            self.lbl_sub.setStyleSheet("color: #38bdf8; font-weight: 500; font-size: 10px;")
-        else:
-            self.lbl_sub.setText("● Brain: Local (qwen2.5:1.5b)")
-            self.lbl_sub.setStyleSheet("color: #10b981; font-weight: 500; font-size: 10px;")
+    def _update_brain_header_indicator(self, provider='groq'):
+        self.lbl_sub.setText("● Brain: Groq AI (Active)")
+        self.lbl_sub.setStyleSheet("color: #38bdf8; font-weight: 500; font-size: 10px;")
 
     def _clear_current_chat(self):
         if self.active_session:
@@ -976,11 +1011,8 @@ class QuickWindow(QWidget):
         # Save user prompt to DB
         self.db.save_chat_message(self.active_session['id'], "user", prompt)
 
-        provider = self.combo_ai_provider.currentData() or "local"
-        if provider == "groq":
-            self.lbl_thinking.setText("Okum is querying Groq Cloud (llama-3.3-70b)...")
-        else:
-            self.lbl_thinking.setText("Okum is thinking locally (qwen2.5:1.5b)...")
+        provider = "groq"
+        self.lbl_thinking.setText("Okum is querying Groq Cloud (llama-3.3-70b)...")
         self.lbl_thinking.show()
         self.txt_prompt.setEnabled(False)
         self.btn_send.setEnabled(False)
@@ -1085,7 +1117,7 @@ class QuickWindow(QWidget):
                 self.lst_music.setCurrentItem(item)
 
         # Update page navigation state
-        self.lbl_music_page_info.setText(f"Page {self.music_page} of {self.total_music_pages} ({self.total_music_count:,} songs)")
+        self.lbl_music_page_info.setText(f"Page {self.music_page} of {self.total_music_pages} ({self.total_music_count:,} tracks • ~/Music & ETS2)")
         self.btn_music_prev.setEnabled(self.music_page > 1)
         self.btn_music_next.setEnabled(self.music_page < self.total_music_pages)
 
