@@ -53,13 +53,11 @@ def create_pen_cursor(color, thickness):
     painter = QPainter(pix)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     
-    # Outer ring
     painter.setPen(QPen(QColor(15, 18, 30, 200), 1.5))
     painter.setBrush(QColor(color))
     radius = max(3.0, min(8.0, thickness / 2.0 + 2.0))
     painter.drawEllipse(QPoint(12, 12), int(radius), int(radius))
     
-    # Center crosshair dot
     painter.setPen(QPen(QColor(255, 255, 255, 220), 1.0))
     painter.drawPoint(12, 12)
     painter.end()
@@ -72,7 +70,6 @@ def create_eraser_cursor(thickness):
     painter = QPainter(pix)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     
-    # Eraser circle outline with dash
     pen = QPen(QColor(244, 63, 94, 230), 1.5, Qt.PenStyle.DashLine)
     painter.setPen(pen)
     painter.setBrush(QColor(244, 63, 94, 40))
@@ -83,7 +80,7 @@ def create_eraser_cursor(thickness):
     return QCursor(pix, center, center)
 
 class OkumBoardCanvas(QWidget):
-    def __init__(self, toolbar):
+    def __init__(self, toolbar=None):
         super().__init__()
         self.toolbar = toolbar
         
@@ -142,8 +139,8 @@ class OkumBoardCanvas(QWidget):
 
     def mousePressEvent(self, event):
         pos = event.position().toPoint()
+        # Direct check if mouse is on toolbar area
         if self.toolbar and self.toolbar.isVisible() and self.toolbar.geometry().contains(pos):
-            event.ignore()
             return
 
         if event.button() == Qt.MouseButton.LeftButton:
@@ -155,11 +152,10 @@ class OkumBoardCanvas(QWidget):
     def mouseMoveEvent(self, event):
         pos = event.position().toPoint()
 
-        # Seamlessly switch to clickable ArrowCursor whenever entering toolbar bounds
+        # Switch to ArrowCursor when hovering over toolbar
         if self.toolbar and self.toolbar.isVisible() and self.toolbar.geometry().contains(pos):
             self.setCursor(Qt.CursorShape.ArrowCursor)
             if not self._drawing:
-                event.ignore()
                 return
         else:
             if not self._drawing:
@@ -214,15 +210,10 @@ class OkumBoardCanvas(QWidget):
 
 
 class OkumBoardToolbar(QWidget):
-    def __init__(self, manager):
-        super().__init__()
+    def __init__(self, manager, parent=None):
+        super().__init__(parent)
         self.manager = manager
         
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
-        )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedHeight(48)
@@ -240,8 +231,6 @@ class OkumBoardToolbar(QWidget):
 
     def enterEvent(self, event):
         self.setCursor(Qt.CursorShape.ArrowCursor)
-        if self.manager and self.manager.canvas:
-            self.manager.canvas.setCursor(Qt.CursorShape.ArrowCursor)
         super().enterEvent(event)
 
     def leaveEvent(self, event):
@@ -252,12 +241,20 @@ class OkumBoardToolbar(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._dragging = True
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._drag_pos = event.position().toPoint()
             event.accept()
 
     def mouseMoveEvent(self, event):
         if self._dragging and event.buttons() == Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            new_pos = self.mapToParent(event.position().toPoint() - self._drag_pos)
+            if self.parent():
+                pw = self.parent().width()
+                ph = self.parent().height()
+                px = max(10, min(pw - self.width() - 10, new_pos.x()))
+                py = max(10, min(ph - self.height() - 10, new_pos.y()))
+                self.move(px, py)
+            else:
+                self.move(new_pos)
             event.accept()
 
     def mouseReleaseEvent(self, event):
@@ -453,8 +450,9 @@ class OkumBoardManager:
     _instance = None
 
     def __init__(self):
-        self.toolbar = OkumBoardToolbar(self)
-        self.canvas = OkumBoardCanvas(self.toolbar)
+        self.canvas = OkumBoardCanvas(None)
+        self.toolbar = OkumBoardToolbar(self, parent=self.canvas)
+        self.canvas.toolbar = self.toolbar
         self.is_active = False
 
     @classmethod
@@ -467,13 +465,13 @@ class OkumBoardManager:
         self.is_active = True
         self.canvas.show()
         self.canvas.raise_()
+        self.canvas.activateWindow()
         self.toolbar.show()
         self.toolbar.raise_()
 
     def hide_board(self):
         self.is_active = False
         self.canvas.hide()
-        self.toolbar.hide()
 
     def toggle_board(self):
         if self.is_active:
@@ -485,7 +483,6 @@ class OkumBoardManager:
         self.canvas.clear_canvas()
 
     def take_screenshot(self):
-        # Hide toolbar briefly to capture clean desktop with annotations
         self.toolbar.hide()
         QTimer.singleShot(150, self._capture_screenshot_proc)
 
@@ -497,7 +494,6 @@ class OkumBoardManager:
 
         pix = screen.grabWindow(0)
         
-        # Save to ~/Pictures/OkumScreenshots/
         shots_dir = os.path.expanduser('~/Pictures/OkumScreenshots')
         os.makedirs(shots_dir, exist_ok=True)
         
