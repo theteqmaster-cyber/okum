@@ -1,7 +1,7 @@
 import os
 import random
 import hashlib
-from PyQt6.QtCore import QObject, pyqtSignal, QUrl, QThread
+from PyQt6.QtCore import QObject, pyqtSignal, QUrl, QThread, QFileSystemWatcher, QTimer
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaDevices
 
 try:
@@ -19,17 +19,134 @@ def format_time_ms(ms):
     seconds = total_seconds % 60
     return f"{minutes:02d}:{seconds:02d}"
 
-def get_music_dir():
+def get_music_dirs():
+    """
+    Discovers all available music sources including Euro Truck Simulator 2
+    and standard user Music folders.
+    """
     candidates = [
         os.path.expanduser('~/Music'),
-        os.path.expanduser('~/music')
+        os.path.expanduser('~/music'),
+        os.path.expanduser('~/.local/share/Euro Truck Simulator 2/music/songs'),
+        os.path.expanduser('~/.local/share/Euro Truck Simulator 2/music'),
+        os.path.expanduser('~/.local/share/ets2/music/songs'),
     ]
+    found = []
     for c in candidates:
-        if os.path.exists(c):
-            return c
-    return os.path.expanduser('~/Music')
+        if os.path.isdir(c) and c not in found:
+            found.append(c)
+
+    if not found:
+        default_dir = os.path.expanduser('~/Music')
+        os.makedirs(default_dir, exist_ok=True)
+        found.append(default_dir)
+
+    return found
+
+def get_music_dir():
+    dirs = get_music_dirs()
+    return dirs[0] if dirs else os.path.expanduser('~/Music')
+
+class LibraryScanWorker(QThread):
+    """
+    Background worker that scans thousands of tracks across multiple directories
+    without freezing the UI or consuming excessive memory.
+    """
+    progress = pyqtSignal(int, int)      # (scanned_count, total_count)
+    finished_scan = pyqtSignal(int)     # total_count in library
+
+    def __init__(self, db, music_dirs):
+        super().__init__()
+        self.db = db
+        self.music_dirs = list(music_dirs)
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def run(self):
+        # 1. Prune missing files from DB safely
+        all_db_tracks = self.db.get_all_music_filepaths()
+        existing_db_tracks = {}
+        missing_filepaths = []
+
+        for row in all_db_tracks:
+            fp = row.get('filepath')
+            if fp:
+                if os.path.exists(fp):
+                    existing_db_tracks[fp] = row
+                else:
+                    missing_filepaths.append(fp)
+
+        if missing_filepaths:
+            for i in range(0, len(missing_filepaths), 500):
+                self.db.delete_music_tracks_batch(missing_filepaths[i:i + 500])
+
+        if self._is_cancelled:
+            return
+
+        tracks_to_insert = []
+        tracks_need_metadata = []
+
+        def _scan_dir(path):
+            if self._is_cancelled or not os.path.exists(path):
+                return
+            try:
+                with os.scandir(path) as it:
+                    for entry in it:
+                        if self._is_cancelled:
+                            break
+                        if entry.is_dir(follow_symlinks=False):
+                            _scan_dir(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            ext = os.path.splitext(entry.name)[1].lower()
+                            if ext in VALID_AUDIO_EXTS:
+                                full_p = entry.path
+                                if full_p not in existing_db_tracks:
+                                    name_no_ext = os.path.splitext(entry.name)[0]
+                                    if ' - ' in name_no_ext:
+                                        parts = name_no_ext.split(' - ', 1)
+                                        artist, title = parts[0].strip(), parts[1].strip()
+                                    else:
+                                        artist, title = 'Local Music', name_no_ext
+
+                                    track_id = hashlib.md5(full_p.encode('utf-8')).hexdigest()[:16]
+                                    item = {
+                                        'id': track_id,
+                                        'filepath': full_p,
+                                        'filename': entry.name,
+                                        'title': title,
+                                        'artist': artist,
+                                        'album': '',
+                                        'duration': 0,
+                                        'ext': ext
+                                    }
+                                    tracks_to_insert.append(item)
+                                    tracks_need_metadata.append(item)
+
+                                    if len(tracks_to_insert) >= 200:
+                                        self.db.upsert_music_tracks_batch(tracks_to_insert)
+                                        tracks_to_insert.clear()
+                                        QThread.msleep(1)
+            except (PermissionError, FileNotFoundError):
+                pass
+
+        for m_dir in self.music_dirs:
+            if self._is_cancelled:
+                break
+            _scan_dir(m_dir)
+
+        if tracks_to_insert and not self._is_cancelled:
+            self.db.upsert_music_tracks_batch(tracks_to_insert)
+            tracks_to_insert.clear()
+
+        total_count = self.db.get_music_tracks_count()
+        self.finished_scan.emit(total_count)
 
 class MetadataScanWorker(QThread):
+    """
+    Lightweight background worker extracting audio duration and tags in small chunks.
+    """
     progress = pyqtSignal(int, int)
     finished_scan = pyqtSignal()
 
@@ -47,10 +164,11 @@ class MetadataScanWorker(QThread):
             self.finished_scan.emit()
             return
 
-        total = len(self.tracks)
-        for i, track in enumerate(self.tracks):
+        total = min(len(self.tracks), 1000) # Process up to 1000 at a time to conserve memory
+        for i in range(total):
             if self._is_cancelled:
                 break
+            track = self.tracks[i]
             filepath = track.get('filepath')
             if not filepath or not os.path.exists(filepath):
                 continue
@@ -69,7 +187,7 @@ class MetadataScanWorker(QThread):
                     artist = f.get('artist', [None])[0] or track.get('artist') or fallback_artist
                     album = f.get('album', [None])[0] or track.get('album', '')
                     duration = int(f.info.length * 1000) if hasattr(f, 'info') and hasattr(f.info, 'length') else track.get('duration', 0)
-                    
+
                     if not title or not title.strip():
                         title = fallback_title
                     if not artist or not artist.strip():
@@ -79,8 +197,9 @@ class MetadataScanWorker(QThread):
             except Exception:
                 pass
 
-            if i % 25 == 0 or i == total - 1:
+            if i % 25 == 0:
                 self.progress.emit(i + 1, total)
+                QThread.msleep(3)
 
         self.finished_scan.emit()
 
@@ -99,7 +218,8 @@ class MusicService(QObject):
     def __init__(self, db):
         super().__init__()
         self.db = db
-        self.music_dir = get_music_dir()
+        self.music_dirs = get_music_dirs()
+        self.music_dir = self.music_dirs[0] if self.music_dirs else os.path.expanduser('~/Music')
 
         # QtMultimedia Player Setup
         self.player = QMediaPlayer(self)
@@ -127,10 +247,24 @@ class MusicService(QObject):
         self._shuffle_order = []
         self._shuffle_pos = -1
 
-        # Scanner worker
+        # Scanner threads
         self._scan_worker = None
+        self._meta_worker = None
 
-        # Perform quick initial library scan & prune deleted files
+        # Real-time directory watcher
+        self.watcher = QFileSystemWatcher(self)
+        for d in self.music_dirs:
+            if os.path.exists(d):
+                self.watcher.addPath(d)
+        self.watcher.directoryChanged.connect(self._on_watched_dir_changed)
+
+        # Debounce timer for file watcher to wait until copy/download completes
+        self._watch_timer = QTimer(self)
+        self._watch_timer.setSingleShot(True)
+        self._watch_timer.setInterval(1500)
+        self._watch_timer.timeout.connect(self.scan_library_fast)
+
+        # Initial background scan
         self.scan_library_fast()
 
     @classmethod
@@ -139,75 +273,28 @@ class MusicService(QObject):
             cls._instance = MusicService(db)
         return cls._instance
 
+    def _on_watched_dir_changed(self, path):
+        """Triggered automatically whenever a song is added, renamed, or deleted in the folder."""
+        self._watch_timer.start()
+
     def scan_library_fast(self):
-        """Scans the music directory in milliseconds, indexes new songs, and removes deleted files."""
-        # 1. Safety Check: Prune missing / deleted tracks from database
-        all_db_tracks = self.db.get_all_music_filepaths()
-        missing_filepaths = []
-        for row in all_db_tracks:
-            fp = row.get('filepath')
-            if fp and not os.path.exists(fp):
-                missing_filepaths.append(fp)
-        
-        if missing_filepaths:
-            self.db.delete_music_tracks_batch(missing_filepaths)
-
-        if not os.path.exists(self.music_dir):
-            total_count = self.db.get_music_tracks_count()
-            self.library_scanned.emit(total_count)
-            return
-
-        tracks_to_insert = []
-        tracks_need_metadata = []
-
-        existing_db_tracks = {row['filepath']: row for row in self.db.get_all_music_filepaths()}
-
-        for root, _, files in os.walk(self.music_dir):
-            for f in files:
-                ext = os.path.splitext(f)[1].lower()
-                if ext in VALID_AUDIO_EXTS:
-                    full_p = os.path.join(root, f)
-                    if full_p not in existing_db_tracks:
-                        name_no_ext = os.path.splitext(f)[0]
-                        if ' - ' in name_no_ext:
-                            parts = name_no_ext.split(' - ', 1)
-                            artist, title = parts[0].strip(), parts[1].strip()
-                        else:
-                            artist, title = 'Local Music', name_no_ext
-
-                        track_id = hashlib.md5(full_p.encode('utf-8')).hexdigest()[:16]
-                        track_item = {
-                            'id': track_id,
-                            'filepath': full_p,
-                            'filename': f,
-                            'title': title,
-                            'artist': artist,
-                            'album': '',
-                            'duration': 0,
-                            'ext': ext
-                        }
-                        tracks_to_insert.append(track_item)
-                        tracks_need_metadata.append(track_item)
-                    elif existing_db_tracks[full_p]['duration'] == 0:
-                        tracks_need_metadata.append({'filepath': full_p, 'title': '', 'artist': ''})
-
-        if tracks_to_insert:
-            self.db.upsert_music_tracks_batch(tracks_to_insert)
-
-        total_count = self.db.get_music_tracks_count()
-        self.library_scanned.emit(total_count)
-
-        # Launch background metadata scan for missing tags if any
-        if tracks_need_metadata:
-            self._start_background_metadata_scan(tracks_need_metadata)
-
-    def _start_background_metadata_scan(self, tracks):
+        """Asynchronously scans music directories in the background without blocking the UI."""
         if self._scan_worker and self._scan_worker.isRunning():
             self._scan_worker.cancel()
-            self._scan_worker.wait()
+            self._scan_worker.wait(500)
 
-        self._scan_worker = MetadataScanWorker(self.db, tracks)
+        # Refresh directory list in case ETS2 or new paths appeared
+        self.music_dirs = get_music_dirs()
+        for d in self.music_dirs:
+            if os.path.exists(d) and d not in self.watcher.directories():
+                self.watcher.addPath(d)
+
+        self._scan_worker = LibraryScanWorker(self.db, self.music_dirs)
+        self._scan_worker.finished_scan.connect(self._on_scan_finished)
         self._scan_worker.start()
+
+    def _on_scan_finished(self, total_count):
+        self.library_scanned.emit(total_count)
 
     # Playback Controls with Safety Checks
     def play_track(self, track_dict, playlist=None, _attempt_count=0):
@@ -227,17 +314,13 @@ class MusicService(QObject):
 
         # Safety Check: Verify file exists on disk
         if not filepath or not os.path.exists(filepath):
-            # Prune from DB
             if filepath:
                 self.db.delete_music_track(filepath)
-            
-            # Remove from active playlist
+
             self.current_playlist = [t for t in self.current_playlist if t.get('filepath') != filepath]
-            
             song_name = track_dict.get('title') or track_dict.get('filename') or 'Song'
             self.track_unavailable.emit(track_dict, f"File not found: '{song_name}' (removed from library).")
-            
-            # Try to advance safely to next track
+
             if self.current_playlist:
                 next_idx = self.current_index if self.current_index < len(self.current_playlist) else 0
                 next_track_item = self.current_playlist[next_idx]
@@ -253,9 +336,8 @@ class MusicService(QObject):
             self.current_index = len(self.current_playlist) - 1
 
         self._update_shuffle_indices()
-
         self.current_track = track_dict
-        
+
         try:
             self.player.setSource(QUrl.fromLocalFile(filepath))
             self.player.play()
@@ -383,7 +465,6 @@ class MusicService(QObject):
         if not self.current_playlist:
             return
 
-        # If played more than 3 seconds, restart current track
         try:
             if self.player.position() > 3000:
                 self.seek(0)
@@ -409,7 +490,6 @@ class MusicService(QObject):
 
     # Bluetooth Disconnect & Audio Sink Protection
     def _on_audio_outputs_changed(self):
-        """Safely re-binds audio device when Bluetooth/USB audio device disconnects or reconnects."""
         try:
             default_device = QMediaDevices.defaultAudioOutput()
             if self.audio_output and not default_device.isNull():
@@ -420,7 +500,6 @@ class MusicService(QObject):
             pass
 
     def _on_player_error(self, error, error_string):
-        """Intercepts QMediaPlayer errors (e.g. bluetooth disconnect) to prevent process crash."""
         try:
             if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
                 self.player.pause()
@@ -428,7 +507,6 @@ class MusicService(QObject):
         except Exception:
             pass
 
-        # Recover audio output device if lost
         try:
             default_device = QMediaDevices.defaultAudioOutput()
             if self.audio_output and not default_device.isNull():
