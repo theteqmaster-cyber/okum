@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Okum — Personal Assistant</title>
+  <meta name="description" content="Okum is your offline personal assistant and quick note manager.">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0b0d17">
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- Icons -->
+  <script src="https://unpkg.com/feather-icons"></script>
+  
+  <!-- Styles -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dark-theme">
+
+  <!-- Ambient Background Gradients -->
+  <div class="bg-gradient-glow blob-1"></div>
+  <div class="bg-gradient-glow blob-2"></div>
+  <div class="bg-gradient-glow blob-3"></div>
+
+  <!-- FLOATING ORB WIDGET (The core floating circle) -->
+  <div id="okum-orb" class="okum-orb-container" title="Click to open Okum Quick Notepad (Drag to move)">
+    <div class="orb-pulse-ring"></div>
+    <div class="orb-pulse-ring delay"></div>
+    <div class="orb-core">
+      <div class="orb-inner-glow"></div>
+      <div class="orb-avatar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>
+          <circle cx="12" cy="12" r="3" class="orb-dot"/>
+          <path d="M12 7v2M12 15v2M7 12H5M19 12h-2" class="orb-rays"/>
+        </svg>
+      </div>
+      <span class="orb-status-indicator" id="orb-status-dot"></span>
+    </div>
+    <div class="orb-tooltip">Quick Note <span class="kbd">Click</span></div>
+  </div>
+
+  <!-- COMPACT QUICK NOTEPAD MODAL / FLOATING PANEL -->
+  <div id="quick-notepad-panel" class="quick-notepad-panel hidden">
+    <div class="notepad-header">
+      <div class="notepad-title">
+        <span class="notepad-icon-badge"><i data-feather="edit-3"></i></span>
+        <div>
+          <h3>Okum Quick Note</h3>
+          <span class="notepad-subtitle" id="notepad-status-time">Auto-saves to local storage</span>
+        </div>
+      </div>
+      <div class="notepad-actions">
+        <button id="btn-voice-note" class="btn-icon" title="Voice to Text Note">
+          <i data-feather="mic"></i>
+        </button>
+        <button id="btn-expand-dashboard" class="btn-icon" title="Expand Full Dashboard">
+          <i data-feather="maximize-2"></i>
+        </button>
+        <button id="btn-close-notepad" class="btn-icon btn-close" title="Close (Esc)">
+          <i data-feather="x"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Active Note Form -->
+    <div class="notepad-body">
+      <input type="text" id="note-title-input" class="note-title-input" placeholder="Title or quick thought..." autocomplete="off">
+      
+      <div class="notepad-toolbar">
+        <div class="category-pills" id="category-pills">
+          <button class="pill active" data-category="General">General</button>
+          <button class="pill" data-category="Ideas">Ideas</button>
+          <button class="pill" data-category="Tasks">Tasks</button>
+          <button class="pill" data-category="Urgent">Urgent</button>
+        </div>
+        <button id="btn-pin-note" class="btn-pill-action" title="Pin Note">
+          <i data-feather="bookmark"></i> Pin
+        </button>
+      </div>
+
+      <textarea id="note-content-input" class="note-content-input" placeholder="Type your note here... (Markdown supported)"></textarea>
+      
+      <!-- Voice recording visualizer bar (hidden by default) -->
+      <div id="voice-indicator-bar" class="voice-indicator-bar hidden">
+        <span class="recording-pulse"></span>
+        <span id="voice-status-text">Listening to mphatic... Speak clearly</span>
+        <button id="btn-stop-voice" class="btn-text-sm">Stop</button>
+      </div>
+    </div>
+
+    <div class="notepad-footer">
+      <div class="notepad-meta">
+        <span id="word-char-count">0 words • 0 chars</span>
+      </div>
+      <div class="notepad-buttons">
+        <button id="btn-new-note" class="btn-secondary">
+          <i data-feather="plus"></i> New Note
+        </button>
+        <button id="btn-save-note" class="btn-primary">
+          <i data-feather="check"></i> Save Note
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FULL ASSISTANT DASHBOARD DRAWER / OVERLAY -->
+  <div id="dashboard-overlay" class="dashboard-overlay hidden">
+    <div class="dashboard-container">
+      
+      <!-- Sidebar Navigation -->
+      <aside class="dashboard-sidebar">
+        <div class="sidebar-header">
+          <div class="brand-logo">
+            <div class="brand-orb"></div>
+            <h2>Okum</h2>
+            <span class="brand-tag">v1.0</span>
+          </div>
+          <p class="user-greeting-sub">Assistant for <strong class="highlight-user">mphatic</strong></p>
+        </div>
+
+        <nav class="sidebar-nav">
+          <button class="nav-item active" data-tab="tab-notes">
+            <i data-feather="file-text"></i> All Notes <span class="badge" id="total-notes-badge">0</span>
+          </button>
+          <button class="nav-item" data-tab="tab-briefing">
+            <i data-feather="sun"></i> Daily Briefing
+          </button>
+          <button class="nav-item" data-tab="tab-focus">
+            <i data-feather="clock"></i> Focus Timer
+          </button>
+          <button class="nav-item" data-tab="tab-settings">
+            <i data-feather="sliders"></i> Settings & Backup
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="offline-badge">
+            <span class="status-dot-green"></span> 100% Offline Mode
+          </div>
+          <button id="btn-cmd-k" class="btn-cmd-shortcut">
+            <i data-feather="search"></i> Command Bar <span class="kbd">Ctrl K</span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- Main Dashboard Content -->
+      <main class="dashboard-main">
+        <header class="dashboard-topbar">
+          <div class="topbar-search">
+            <i data-feather="search" class="search-icon"></i>
+            <input type="text" id="dashboard-search-input" placeholder="Search notes by title, content or category..." autocomplete="off">
+            <span class="kbd-hint">Esc to exit</span>
+          </div>
+          <div class="topbar-actions">
+            <button id="btn-create-note-dash" class="btn-primary">
+              <i data-feather="plus"></i> Create Note
+            </button>
+            <button id="btn-close-dashboard" class="btn-icon" title="Close Dashboard">
+              <i data-feather="x"></i>
+            </button>
+          </div>
+        </header>
+
+        <!-- TAB 1: ALL NOTES -->
+        <section id="tab-notes" class="dashboard-tab-content active">
+          <div class="tab-header-flex">
+            <div>
+              <h2>Your Notes Repository</h2>
+              <p class="text-muted">Organize, filter, export, and search all your saved notes.</p>
+            </div>
+            <div class="filter-group">
+              <select id="filter-category-select" class="custom-select">
+                <option value="ALL">All Categories</option>
+                <option value="General">General</option>
+                <option value="Ideas">Ideas</option>
+                <option value="Tasks">Tasks</option>
+                <option value="Urgent">Urgent</option>
+              </select>
+              <button id="btn-sort-notes" class="btn-secondary" title="Sort Notes">
+                <i data-feather="arrow-down"></i> <span id="sort-label">Newest First</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Notes Grid -->
+          <div id="notes-grid" class="notes-grid">
+            <!-- Dynamically populated notes cards -->
+          </div>
+
+          <!-- Empty State -->
+          <div id="notes-empty-state" class="empty-state hidden">
+            <div class="empty-icon"><i data-feather="inbox"></i></div>
+            <h3>No notes found</h3>
+            <p>Click the floating circle or the "Create Note" button to record your first note.</p>
+            <button id="btn-empty-create" class="btn-primary">Take a Note</button>
+          </div>
+        </section>
+
+        <!-- TAB 2: DAILY BRIEFING -->
+        <section id="tab-briefing" class="dashboard-tab-content hidden">
+          <div class="briefing-card hero-card">
+            <div class="hero-content">
+              <span class="briefing-time-badge" id="briefing-time-badge">Good Day</span>
+              <h1 id="briefing-greeting">Hello, mphatic!</h1>
+              <p id="briefing-quote">"The secret of getting ahead is getting started."</p>
+              <div class="date-clock-row">
+                <span id="briefing-clock" class="clock-display">00:00:00</span>
+                <span id="briefing-date" class="date-display">Monday, Aug 17</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="briefing-grid">
+            <!-- Quick Focus Goal -->
+            <div class="dashboard-card">
+              <div class="card-header">
+                <h3><i data-feather="target"></i> Today's Focus Goal</h3>
+              </div>
+              <div class="card-body">
+                <input type="text" id="input-daily-goal" class="input-styled" placeholder="What is your main priority today, mphatic?">
+                <p class="text-sm text-muted mt-2">Okum keeps your goal visible on top of your notepad.</p>
+              </div>
+            </div>
+
+            <!-- Quick Stats -->
+            <div class="dashboard-card">
+              <div class="card-header">
+                <h3><i data-feather="activity"></i> Assistant Summary</h3>
+              </div>
+              <div class="card-body stats-row">
+                <div class="stat-box">
+                  <span class="stat-num" id="stat-total-count">0</span>
+                  <span class="stat-label">Total Notes</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-num" id="stat-pinned-count">0</span>
+                  <span class="stat-label">Pinned Notes</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-num" id="stat-words-count">0</span>
+                  <span class="stat-label">Total Words</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 3: FOCUS TIMER -->
+        <section id="tab-focus" class="dashboard-tab-content hidden">
+          <div class="focus-container dashboard-card">
+            <div class="focus-header">
+              <h2>Okum Focus Mode</h2>
+              <p class="text-muted">Stay in the zone with an offline focus timer and ambient background audio.</p>
+            </div>
+            <div class="timer-display" id="timer-display">25:00</div>
+            <div class="timer-controls">
+              <button id="btn-timer-start" class="btn-primary btn-lg"><i data-feather="play"></i> Start Focus</button>
+              <button id="btn-timer-reset" class="btn-secondary btn-lg"><i data-feather="rotate-ccw"></i> Reset</button>
+            </div>
+            <div class="timer-modes">
+              <button class="pill timer-pill active" data-minutes="25">25m Focus</button>
+              <button class="pill timer-pill" data-minutes="5">5m Break</button>
+              <button class="pill timer-pill" data-minutes="15">15m Break</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 4: SETTINGS & BACKUP -->
+        <section id="tab-settings" class="dashboard-tab-content hidden">
+          <div class="dashboard-card">
+            <h3><i data-feather="hard-drive"></i> Backup & Data Management</h3>
+            <p class="text-muted">Since Okum works offline, all data is saved locally on your device.</p>
+
+            <div class="settings-actions">
+              <div class="setting-item">
+                <div>
+                  <h4>Export All Notes (JSON)</h4>
+                  <p class="text-sm text-muted">Download a complete backup of all your notes and settings.</p>
+                </div>
+                <button id="btn-export-json" class="btn-secondary"><i data-feather="download"></i> Export JSON</button>
+              </div>
+
+              <div class="setting-item">
+                <div>
+                  <h4>Import Notes (JSON)</h4>
+                  <p class="text-sm text-muted">Restore your notes from a previously exported backup file.</p>
+                </div>
+                <label class="btn-secondary file-upload-btn">
+                  <i data-feather="upload"></i> Import File
+                  <input type="file" id="input-import-file" accept=".json" hidden>
+                </label>
+              </div>
+
+              <div class="setting-item">
+                <div>
+                  <h4>Audio Sound Effects</h4>
+                  <p class="text-sm text-muted">Enable subtle click & feedback sounds when interacting with Okum.</p>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="toggle-sound-effects" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="setting-item warning-zone">
+                <div>
+                  <h4 class="text-danger">Clear All Local Data</h4>
+                  <p class="text-sm text-muted">Permanently delete all stored notes from this browser.</p>
+                </div>
+                <button id="btn-clear-all" class="btn-danger"><i data-feather="trash-2"></i> Clear All Data</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- COMMAND PALETTE MODAL (Ctrl + K) -->
+  <div id="cmd-palette-modal" class="cmd-modal-backdrop hidden">
+    <div class="cmd-modal-card">
+      <div class="cmd-input-wrapper">
+        <i data-feather="command"></i>
+        <input type="text" id="cmd-search-input" placeholder="Type a command or note name..." autocomplete="off">
+        <span class="kbd">ESC</span>
+      </div>
+      <div id="cmd-results-list" class="cmd-results-list">
+        <!-- Command items -->
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Application JS -->
+  <script src="app.js"></script>
+</body>
+</html>

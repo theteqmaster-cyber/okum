@@ -1,0 +1,349 @@
+/* Okum PyQt6 Design System Stylesheet */
+
+QWidget {
+    font-family: 'Inter', -apple-system, sans-serif;
+    color: #f3f4f6;
+}
+
+/* Quick Window Frame Container */
+QFrame#QuickNotepad, QFrame#QuickWindowContainer {
+    background-color: rgba(18, 22, 38, 245);
+    border-radius: 16px;
+}
+
+/* Dashboard Window */
+.DashboardWindow {
+    background-color: rgba(15, 18, 30, 250);
+    border: 1px solid rgba(99, 102, 241, 0.4);
+    border-radius: 16px;
+}
+
+/* Labels */
+QLabel {
+    color: #f3f4f6;
+    background: transparent;
+}
+
+QLabel#titleLabel {
+    font-family: 'Outfit', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+QLabel#subLabel {
+    font-size: 11px;
+    color: #9ca3af;
+}
+
+/* Inputs & Text Area */
+QLineEdit, QTextEdit {
+    background-color: rgba(10, 12, 22, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 10px;
+    padding: 8px 12px;
+    color: #ffffff;
+    selection-background-color: #6366f1;
+}
+
+QLineEdit:focus, QTextEdit:focus {
+    border-color: #6366f1;
+    background-color: rgba(10, 12, 22, 0.98);
+}
+
+QLineEdit#noteTitle {
+    font-size: 16px;
+    font-weight: bold;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 0px;
+    background: transparent;
+    padding: 4px 0px;
+    color: #ffffff;
+}
+
+QTextEdit#noteContent {
+    font-size: 13px;
+    line-height: 1.5;
+    background-color: rgba(10, 12, 22, 0.95);
+}
+
+/* Buttons */
+QPushButton {
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
+    padding: 7px 14px;
+    font-weight: 600;
+    color: #f3f4f6;
+}
+
+QPushButton:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+QPushButton#btnPrimary {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #6366f1, stop:1 #8b5cf6);
+    border: none;
+    color: #ffffff;
+}
+
+QPushButton#btnPrimary:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4f46e5, stop:1 #7c3aed);
+}
+
+QPushButton#btnDanger {
+    background-color: rgba(239, 68, 68, 0.25);
+    border: 1px solid rgba(239, 68, 68, 0.5);
+    color: #ef4444;
+}
+
+QPushButton#btnDanger:hover {
+    background-color: rgba(239, 68, 68, 0.45);
+}
+
+QPushButton#btnCategory {
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-size: 11px;
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #d1d5db;
+}
+
+QPushButton#btnCategory:checked {
+    background-color: #6366f1;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+QPushButton#btnTab {
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #9ca3af;
+}
+
+QPushButton#btnTab:checked {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #6366f1, stop:1 #8b5cf6);
+    border: none;
+    color: #ffffff;
+}
+
+/* Modern Icon-Only Buttons */
+QPushButton#btnTabIcon {
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 0px;
+}
+
+QPushButton#btnTabIcon:hover {
+    background-color: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+QPushButton#btnTabIcon:checked {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #6366f1, stop:1 #8b5cf6);
+    border: 1px solid rgba(139, 92, 246, 0.8);
+}
+
+QPushButton#btnHeaderControl {
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 0px;
+}
+
+QPushButton#btnHeaderControl:hover {
+    background-color: rgba(239, 68, 68, 0.25);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+QPushButton#btnCategoryIcon {
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 0px;
+}
+
+QPushButton#btnCategoryIcon:hover {
+    background-color: rgba(255, 255, 255, 0.18);
+}
+
+QPushButton#btnCategoryIcon:checked {
+    background-color: #6366f1;
+    border-color: #8b5cf6;
+}
+
+QPushButton#btnIconSecondary {
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    padding: 0px;
+}
+
+QPushButton#btnIconSecondary:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+QPushButton#btnPrimaryIcon {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #6366f1, stop:1 #8b5cf6);
+    border: none;
+    border-radius: 10px;
+    padding: 0px;
+}
+
+QPushButton#btnPrimaryIcon:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4f46e5, stop:1 #7c3aed);
+}
+
+/* Scrollbars */
+QScrollBar:vertical {
+    border: none;
+    background: rgba(0, 0, 0, 0.3);
+    width: 8px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical {
+    background: rgba(255, 255, 255, 0.25);
+    min-height: 20px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #6366f1;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+/* Music Player Controls & Sliders */
+QFrame#nowPlayingCard {
+    background-color: rgba(14, 18, 32, 0.85);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 12px;
+    padding: 8px 10px;
+}
+
+QSlider::groove:horizontal {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
+}
+
+QSlider::sub-page:horizontal {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366f1, stop:1 #a855f7);
+    border-radius: 2px;
+}
+
+QSlider::handle:horizontal {
+    background: #ffffff;
+    border: 1px solid #6366f1;
+    width: 10px;
+    height: 10px;
+    margin: -3px 0;
+    border-radius: 5px;
+}
+
+QSlider::handle:horizontal:hover {
+    background: #a855f7;
+    transform: scale(1.2);
+}
+
+QPushButton#btnPlayerControl {
+    background-color: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 0px;
+}
+
+QPushButton#btnPlayerControl:hover {
+    background-color: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+QPushButton#btnPlayerControl:checked {
+    background: rgba(99, 102, 241, 0.35);
+    border: 1px solid #8b5cf6;
+    color: #a5b4fc;
+}
+
+QPushButton#btnPageNav {
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+QPushButton#btnPageNav:hover {
+    background-color: rgba(99, 102, 241, 0.3);
+    border-color: #6366f1;
+}
+
+QPushButton#btnPageNav:disabled {
+    background-color: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.05);
+    color: #4b5563;
+}
+
+/* Recent Notes List */
+QListWidget#lstRecentNotes {
+    background: rgba(10, 12, 22, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 4px;
+}
+
+QListWidget#lstRecentNotes::item {
+    padding: 5px 8px;
+    border-radius: 8px;
+    margin-bottom: 3px;
+    background: rgba(22, 27, 46, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+QListWidget#lstRecentNotes::item:hover {
+    background-color: rgba(99, 102, 241, 0.2);
+    border-color: rgba(99, 102, 241, 0.5);
+}
+
+QListWidget#lstRecentNotes::item:selected {
+    background-color: rgba(99, 102, 241, 0.3);
+    border-color: #6366f1;
+}
+
+/* Okum Board Floating Toolbar */
+QWidget#OkumBoardToolbar {
+    background-color: rgba(18, 22, 38, 245);
+    border: 1px solid rgba(99, 102, 241, 0.4);
+    border-radius: 12px;
+}
+
+QPushButton#btnBoardTool {
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 0px;
+}
+
+QPushButton#btnBoardTool:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+QPushButton#btnBoardTool:checked {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #6366f1, stop:1 #8b5cf6);
+    border: 1px solid #a855f7;
+}
+
+
+

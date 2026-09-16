@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Okum Assistant
+Comment=Personal OS-level offline assistant and floating notepad for mphatic
+Exec=env PYTHONPATH=/home/mphatic/Desktop/okum/venv/lib/python3.12/site-packages python3 /home/mphatic/Desktop/okum/main.py
+Icon=utilities-notes
+Terminal=false
+Categories=Utility;Application;
