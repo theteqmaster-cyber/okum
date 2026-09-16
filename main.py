@@ -10,8 +10,7 @@ from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
 from db.database import Database
-from services.ollama_service import preload_model, unload_model
-from ui.orb_widget import FloatingOrb
+from ui.spider_widget import FloatingSpider
 from ui.quick_window import QuickWindow
 from ui.dashboard_window import DashboardWindow
 from ui.board_window import OkumBoardManager
@@ -33,9 +32,6 @@ def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
-    # Preload Ollama LLM into memory on startup
-    preload_model("qwen2.5:1.5b")
-
     # Load QSS Theme
     qss_path = os.path.join(os.path.dirname(__file__), 'styles', 'theme.qss')
     if os.path.exists(qss_path):
@@ -47,7 +43,7 @@ def main():
 
     dashboard = None
     quick_window = None
-    orb = None
+    spider = None
 
     def open_dashboard():
         nonlocal dashboard
@@ -71,8 +67,8 @@ def main():
             quick_window.tab_group.button(tab_index).setChecked(True)
             quick_window._switch_tab(tab_index)
 
-        if orb:
-            quick_window.position_near_orb(orb.pos())
+        if spider:
+            quick_window.position_near_orb(spider.pos())
 
         quick_window.show()
         quick_window.raise_()
@@ -85,13 +81,20 @@ def main():
         else:
             open_quick_window()
 
-    # Create Floating Orb Widget
-    orb = FloatingOrb(toggle_callback=toggle_quick_window)
+    def open_music_player():
+        open_quick_window(tab_index=2)
 
-    # Screen positioning for floating orb (default to bottom-right corner)
-    screen = app.primaryScreen().geometry()
-    orb.move(screen.width() - 90, screen.height() - 120)
-    orb.show()
+    def toggle_board():
+        OkumBoardManager.get_instance().toggle_board()
+
+    # Create Floating Spider Mascot Widget
+    spider = FloatingSpider(
+        toggle_callback=toggle_quick_window,
+        open_music_callback=open_music_player,
+        toggle_board_callback=toggle_board
+    )
+    spider.position_initial()
+    spider.show()
 
     # System Tray Icon
     tray_icon = QSystemTrayIcon(QIcon(create_tray_icon_pixmap()), app)
@@ -121,16 +124,16 @@ def main():
     tray_menu = QMenu()
     act_note = QAction(create_svg_icon(SVG_BOLT, stroke_color="#a5b4fc"), "Quick Assistant (Notes & Ask AI)", tray_menu)
     act_note.triggered.connect(lambda: open_quick_window())
-    
+
     act_music = QAction(create_svg_icon(SVG_MUSIC, stroke_color="#a5b4fc"), "Quick Play (Music Player)", tray_menu)
-    act_music.triggered.connect(lambda: open_quick_window(tab_index=2))
-    
+    act_music.triggered.connect(open_music_player)
+
     act_board = QAction(create_svg_icon(SVG_BOARD, stroke_color="#a5b4fc"), "Okum Board (Screen Annotations)", tray_menu)
-    act_board.triggered.connect(lambda: OkumBoardManager.get_instance().toggle_board())
-    
+    act_board.triggered.connect(toggle_board)
+
     act_dash = QAction(create_svg_icon(SVG_DASH, stroke_color="#a5b4fc"), "Open Dashboard", tray_menu)
     act_dash.triggered.connect(open_dashboard)
-    
+
     act_quit = QAction(create_svg_icon(SVG_EXIT, stroke_color="#f87171"), "Exit Okum", tray_menu)
     act_quit.triggered.connect(app.quit)
 
@@ -141,9 +144,8 @@ def main():
     tray_menu.addSeparator()
     tray_menu.addAction(act_quit)
 
-    # Clean up and unload model and player when app is exiting
+    # Clean up resources on exit
     def cleanup():
-        unload_model("qwen2.5:1.5b")
         if quick_window and quick_window.music_service:
             quick_window.music_service.stop()
         OkumBoardManager.get_instance().close_board()
@@ -155,10 +157,10 @@ def main():
     tray_icon.show()
 
     print("Okum Native Linux Desktop Assistant is running!")
-    print("- Offline Brain: qwen2.5:1.5b preloading in memory...")
-    print("- Floating Orb Widget active on desktop")
-    print("- System Tray Icon active")
-    print("- SQLite & Markdown storage in ~/Documents/OkumNotes/")
+    print("- AI Engine: Groq Cloud AI active")
+    print("- Spider Mascot: Active and roaming desktop")
+    print("- Music Engine: Smart multi-library & background watcher active")
+    print("- Storage: SQLite & Markdown in ~/Documents/OkumNotes/")
 
     sys.exit(app.exec())
 
