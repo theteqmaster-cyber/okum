@@ -5,9 +5,12 @@ from PyQt6.QtGui import (
     QPainter, QColor, QRadialGradient, QLinearGradient, QPen,
     QBrush, QCursor, QPainterPath, QAction, QGuiApplication, QPixmap
 )
-from PyQt6.QtWidgets import QWidget, QMenu
+from ui.orb_widget import FloatingOrb
 
-class FloatingSpider(QWidget):
+# Alias for full system backward compatibility
+FloatingSpider = FloatingOrb
+
+class _LegacySpider(QWidget):
     """
     Okum Desktop Spider Mascot:
     A cute, small articulated spider that crawls unpredictably across the desktop

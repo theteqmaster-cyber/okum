@@ -17,7 +17,7 @@ from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
 from db.database import Database
-from ui.spider_widget import FloatingSpider
+from ui.orb_widget import FloatingOrb
 from ui.quick_window import QuickWindow
 from ui.dashboard_window import DashboardWindow
 from ui.board_window import OkumBoardManager
@@ -120,8 +120,8 @@ def main():
             return True
         return False
 
-    # Create Floating Spider Mascot Widget
-    spider = FloatingSpider(
+    # Create Floating Living Orb Mascot Widget
+    orb = FloatingOrb(
         toggle_callback=toggle_quick_window,
         open_music_callback=open_music_player,
         toggle_board_callback=toggle_board,
@@ -129,8 +129,9 @@ def main():
         toggle_mini_music_callback=toggle_mini_music_player,
         exit_callback=lambda: exit_okum()
     )
-    spider.position_initial()
-    spider.show()
+    orb.position_initial()
+    orb.show()
+    spider = orb  # For backward-compatible variable references
 
     # Initialize Voice Assistant & Neural Female TTS
     from services.tts_service import TTSService
@@ -144,11 +145,18 @@ def main():
     music_svc = MusicService.get_instance(db)
     voice = VoiceService.get_instance(tts_service=tts, music_service=music_svc)
 
+    # Sync music state to orb for rhythm pulse & satellite reveal
+    def on_music_state(playing):
+        orb.set_music_playing(playing)
+
+    music_svc.state_changed.connect(on_music_state)
+    orb.set_music_playing(music_svc.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
+
     def on_tts_state(state):
         if state == "speaking":
-            spider.set_voice_state("SPEAKING")
-        elif state == "idle" and spider.voice_state == "SPEAKING":
-            spider.set_voice_state("IDLE")
+            orb.set_voice_state("SPEAKING")
+        elif state == "idle" and orb.voice_state == "SPEAKING":
+            orb.set_voice_state("IDLE")
 
     tts.state_changed.connect(on_tts_state)
 
@@ -429,7 +437,7 @@ def main():
     print("Okum Native Linux Desktop Assistant is running!")
     print("- AI Engine: Groq Cloud AI active")
     print("- Voice Engine: Offline Vosk STT + Neural Female Voice TTS active")
-    print("- Spider Mascot: Active with bioluminescent voice auras")
+    print("- Mascot: Living Floating Orb (Solar Ember) active with 10s roam & bottom-left dock")
     print("- Music Engine: Smart multi-library & background watcher active")
     print("- Storage: SQLite & Markdown in ~/Documents/OkumNotes/")
 
