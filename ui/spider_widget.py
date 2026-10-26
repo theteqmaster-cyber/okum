@@ -1,9 +1,9 @@
 import math
 import random
-from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QTimer
+from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QTimer, QSettings
 from PyQt6.QtGui import (
     QPainter, QColor, QRadialGradient, QLinearGradient, QPen,
-    QBrush, QCursor, QPainterPath, QAction, QGuiApplication
+    QBrush, QCursor, QPainterPath, QAction, QGuiApplication, QPixmap
 )
 from PyQt6.QtWidgets import QWidget, QMenu
 
@@ -13,19 +13,25 @@ class FloatingSpider(QWidget):
     A cute, small articulated spider that crawls unpredictably across the desktop
     with realistic leg gait, idle twitching, and interactive drag/click response.
     """
-    def __init__(self, toggle_callback, open_music_callback=None, toggle_board_callback=None):
+    def __init__(self, toggle_callback, open_music_callback=None, toggle_board_callback=None, activity_callback=None, toggle_mini_music_callback=None, exit_callback=None):
         super().__init__()
         self.toggle_callback = toggle_callback
         self.open_music_callback = open_music_callback
         self.toggle_board_callback = toggle_board_callback
+        self.activity_callback = activity_callback
+        self.toggle_mini_music_callback = toggle_mini_music_callback
+        self.exit_callback = exit_callback
 
         # Frameless, translucent desktop tool window
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.Tool |
+            Qt.WindowType.WindowDoesNotAcceptFocus
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setMouseTracking(True)
 
         # Mascot dimensions (96x96 provides ample room for articulated legs while remaining neat)
@@ -34,6 +40,14 @@ class FloatingSpider(QWidget):
         # Crawling & Behavior State
         self.state = 'IDLE'           # 'IDLE', 'TURNING', 'CRAWLING', 'DRAGGING'
         self.free_roam_enabled = True # Can be toggled via right-click
+        self.is_look_around = False
+        self._stuck_ticks = 0
+        self._last_moved_win_pos = QPoint()
+
+        # Dynamic Abdomen Glow state (active when windows are open or music is playing)
+        self.abdomen_glow = 0.0
+        self.is_active_session = False
+        self.voice_state = 'IDLE'     # 'IDLE', 'LISTENING', 'THINKING', 'SPEAKING'
         self.heading_angle = -math.pi / 2 # Facing upwards initially
         self.target_angle = self.heading_angle
         
@@ -62,6 +76,15 @@ class FloatingSpider(QWidget):
         self._has_dragged = False
         self._mouse_hovering = False
 
+        # Opacity & Ghost Mode (transparency for unobtrusive productivity)
+        self.settings = QSettings("Okum", "Mascot")
+        try:
+            self.base_opacity = float(self.settings.value("spider_opacity", 0.50))
+        except Exception:
+            self.base_opacity = 0.50
+        self.current_opacity = self.base_opacity
+        self.target_opacity = self.base_opacity
+
         # Main Animation Timer (40 FPS = 25ms interval for silky smooth locomotion)
         self.anim_timer = QTimer(self)
         self.anim_timer.timeout.connect(self._game_loop)
@@ -70,15 +93,64 @@ class FloatingSpider(QWidget):
         self.setToolTip("Okum Spider — Click to open Notes & AI | Drag to move | Right-click for options")
 
     def position_initial(self):
-        screen = QGuiApplication.primaryScreen().geometry()
-        init_x = screen.width() - 110
-        init_y = screen.height() - 150
+        screen = QGuiApplication.primaryScreen().availableGeometry()
+        init_x = screen.x() + screen.width() - 110
+        init_y = screen.y() + screen.height() - 150
         self.move(init_x, init_y)
         self.cur_x = float(init_x)
         self.cur_y = float(init_y)
+        self.target_x = self.cur_x
+        self.target_y = self.cur_y
+        self.state = 'IDLE'
+        self.idle_ticks = 0
+        self.is_look_around = False
+        self._stuck_ticks = 0
+        self._last_moved_win_pos = self.pos()
+
+    def set_voice_state(self, state):
+        """Updates voice interaction state ('IDLE', 'LISTENING', 'THINKING', 'SPEAKING')."""
+        self.voice_state = state.upper()
+        if self.voice_state == "LISTENING":
+            self.setToolTip("Okum — Listening to you...")
+        elif self.voice_state == "THINKING":
+            self.setToolTip("Okum — Thinking...")
+        elif self.voice_state == "SPEAKING":
+            self.setToolTip("Okum — Speaking...")
+        else:
+            self.setToolTip("Okum Spider — Click to open Notes & AI | Drag to move | Right-click for options")
+        self.update()
 
     def _game_loop(self):
         self.breathe_phase = (self.breathe_phase + 0.05) % (2 * math.pi)
+
+        # Smooth ease in / ease out transition for mascot opacity
+        diff_op = self.target_opacity - self.current_opacity
+        if abs(diff_op) > 0.01:
+            self.current_opacity += diff_op * 0.08
+        else:
+            self.current_opacity = self.target_opacity
+
+        # Poll activity (window open or music playing) or voice interaction state
+        is_active = False
+        if self.voice_state != 'IDLE':
+            is_active = True
+        elif self.activity_callback:
+            try:
+                is_active = bool(self.activity_callback())
+            except Exception:
+                is_active = False
+        elif getattr(self, 'manual_glow_override', None) is not None:
+            is_active = bool(self.manual_glow_override)
+
+        self.is_active_session = is_active
+        target_glow = 1.0 if is_active else 0.0
+
+        diff = target_glow - self.abdomen_glow
+        if abs(diff) > 0.01:
+            # Smooth ease in / ease out transition (~0.5s at 40 FPS)
+            self.abdomen_glow += diff * 0.08
+        else:
+            self.abdomen_glow = target_glow
 
         if self._is_dragging:
             self.drag_wiggle = (self.drag_wiggle + 0.25) % (2 * math.pi)
@@ -101,7 +173,16 @@ class FloatingSpider(QWidget):
                 diff = (self.target_angle - self.heading_angle + math.pi) % (2 * math.pi) - math.pi
                 if abs(diff) < 0.1:
                     self.heading_angle = self.target_angle
-                    self.state = 'CRAWLING'
+                    if self.is_look_around:
+                        # Finished looking around; return peacefully to IDLE
+                        self.state = 'IDLE'
+                        self.is_look_around = False
+                        self.idle_ticks = 0
+                        self.target_idle_ticks = random.randint(60, 180)
+                    else:
+                        self.state = 'CRAWLING'
+                        self._stuck_ticks = 0
+                        self._last_moved_win_pos = self.pos()
                 else:
                     turn_step = 0.12 if diff > 0 else -0.12
                     self.heading_angle += turn_step
@@ -119,48 +200,96 @@ class FloatingSpider(QWidget):
                     self.state = 'IDLE'
                     self.idle_ticks = 0
                     self.target_idle_ticks = random.randint(60, 200) # Rest for 2.5 - 8 seconds
+                    self._stuck_ticks = 0
                 else:
-                    # Smoothly advance position
+                    # Next candidate position
                     step = min(self.crawl_speed, dist)
-                    self.cur_x += math.cos(self.heading_angle) * step
-                    self.cur_y += math.sin(self.heading_angle) * step
-                    self.move(int(self.cur_x), int(self.cur_y))
+                    cand_x = self.cur_x + math.cos(self.heading_angle) * step
+                    cand_y = self.cur_y + math.sin(self.heading_angle) * step
 
-                    # Advance leg walking gait
-                    gait_speed = 0.12 * (self.crawl_speed / 2.0)
-                    self.walk_phase = (self.walk_phase + gait_speed) % (2 * math.pi)
-                    self.pedipalp_phase = (self.pedipalp_phase + 0.18) % (2 * math.pi)
+                    # Strict boundary checks against screen available workarea
+                    screen = QGuiApplication.primaryScreen().availableGeometry()
+                    margin = 40
+                    min_x = screen.x() + margin
+                    max_x = screen.x() + screen.width() - margin - self.width()
+                    min_y = screen.y() + margin
+                    max_y = screen.y() + screen.height() - margin - self.height()
 
-                    # Occasional sudden pause (unpredictable spider behavior)
-                    if random.random() < 0.008 and self.crawl_ticks > 25:
+                    # If candidate position would cross desktop edge, stop gracefully
+                    if cand_x < min_x or cand_x > max_x or cand_y < min_y or cand_y > max_y:
+                        self.cur_x = max(min_x, min(max_x, cand_x))
+                        self.cur_y = max(min_y, min(max_y, cand_y))
+                        nx, ny = int(self.cur_x), int(self.cur_y)
+                        if nx != self.x() or ny != self.y():
+                            self.move(nx, ny)
                         self.state = 'IDLE'
                         self.idle_ticks = 0
-                        self.target_idle_ticks = random.randint(20, 50) # Brief 1s pause
+                        self.target_idle_ticks = random.randint(60, 180)
+                        self._stuck_ticks = 0
+                    else:
+                        self.cur_x = cand_x
+                        self.cur_y = cand_y
+                        nx, ny = int(self.cur_x), int(self.cur_y)
+                        if nx != self.x() or ny != self.y():
+                            self.move(nx, ny)
+
+                        # Physical movement / stuck verification
+                        curr_win_pos = self.pos()
+                        if curr_win_pos == self._last_moved_win_pos:
+                            self._stuck_ticks += 1
+                            if self._stuck_ticks >= 6: # Blocked by an obstacle or window manager constraint
+                                self.state = 'IDLE'
+                                self.idle_ticks = 0
+                                self.target_idle_ticks = random.randint(60, 160)
+                                self._stuck_ticks = 0
+                        else:
+                            self._last_moved_win_pos = curr_win_pos
+                            self._stuck_ticks = 0
+
+                        # Advance leg walking gait
+                        gait_speed = 0.12 * (self.crawl_speed / 2.0)
+                        self.walk_phase = (self.walk_phase + gait_speed) % (2 * math.pi)
+                        self.pedipalp_phase = (self.pedipalp_phase + 0.18) % (2 * math.pi)
+
+                        # Occasional sudden pause (unpredictable spider behavior)
+                        if random.random() < 0.008 and self.crawl_ticks > 25:
+                            self.state = 'IDLE'
+                            self.idle_ticks = 0
+                            self.target_idle_ticks = random.randint(20, 50) # Brief 1s pause
 
         self.update()
 
     def _plan_next_action(self):
-        screen = QGuiApplication.primaryScreen().geometry()
-        margin = 60
-        max_x = max(margin, screen.width() - 120)
-        max_y = max(margin, screen.height() - 140)
+        screen = QGuiApplication.primaryScreen().availableGeometry()
+        margin = 40
+        min_x = screen.x() + margin
+        max_x = max(min_x + 50, screen.x() + screen.width() - margin - self.width())
+        min_y = screen.y() + margin
+        max_y = max(min_y + 50, screen.y() + screen.height() - margin - self.height())
+
+        # Ensure cur_x and cur_y are synchronized with current actual position
+        self.cur_x = float(self.x())
+        self.cur_y = float(self.y())
 
         # 25% chance to just turn in place and look around
         if random.random() < 0.25:
             self.target_angle = random.uniform(-math.pi, math.pi)
+            self.is_look_around = True
             self.state = 'TURNING'
             return
 
+        self.is_look_around = False
+
         # Pick random distance and direction
-        dist = random.uniform(80, 380)
+        dist = random.uniform(80, 360)
         angle = random.uniform(-math.pi, math.pi)
 
         new_x = self.cur_x + math.cos(angle) * dist
         new_y = self.cur_y + math.sin(angle) * dist
 
-        # Clamp inside screen boundaries
-        new_x = max(margin, min(max_x, new_x))
-        new_y = max(margin, min(max_y, new_y))
+        # Clamp inside screen available boundaries
+        new_x = max(min_x, min(max_x, new_x))
+        new_y = max(min_y, min(max_y, new_y))
 
         # Real angle towards clamped target
         actual_dx = new_x - self.cur_x
@@ -178,11 +307,11 @@ class FloatingSpider(QWidget):
         # Random speed variations: stealth crawl, normal walk, or quick dash
         speed_dice = random.random()
         if speed_dice < 0.35:
-            self.crawl_speed = random.uniform(1.2, 1.8) # Slow stealth crawl
+            self.crawl_speed = random.uniform(1.4, 2.0) # Slow stealth crawl
         elif speed_dice < 0.80:
             self.crawl_speed = random.uniform(2.4, 3.8) # Normal natural speed
         else:
-            self.crawl_speed = random.uniform(4.5, 6.5) # Quick spider dart
+            self.crawl_speed = random.uniform(4.5, 6.0) # Quick spider dart
 
         self.crawl_ticks = 0
         dist_to_go = math.hypot(actual_dx, actual_dy)
@@ -190,14 +319,31 @@ class FloatingSpider(QWidget):
 
         self.state = 'TURNING'
 
+    def cleanup(self):
+        """Cleanup handler on application shutdown."""
+        try:
+            self.anim_timer.stop()
+            self.hide()
+        except Exception:
+            pass
+
+    def set_mascot_opacity(self, val):
+        """Sets base opacity, updates targets, and persists to QSettings."""
+        self.base_opacity = float(val)
+        self.target_opacity = min(1.0, max(0.85, self.base_opacity)) if self._mouse_hovering else self.base_opacity
+        self.settings.setValue("spider_opacity", self.base_opacity)
+        self.update()
+
     # Mouse Events
     def enterEvent(self, event):
         self._mouse_hovering = True
+        self.target_opacity = min(1.0, max(0.85, self.base_opacity))
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         super().enterEvent(event)
 
     def leaveEvent(self, event):
         self._mouse_hovering = False
+        self.target_opacity = self.base_opacity
         super().leaveEvent(event)
 
     def mousePressEvent(self, event):
@@ -229,6 +375,13 @@ class FloatingSpider(QWidget):
                 self.toggle_callback()
             else:
                 # Settled at new position
+                self.cur_x = float(self.x())
+                self.cur_y = float(self.y())
+                self.target_x = self.cur_x
+                self.target_y = self.cur_y
+                self.is_look_around = False
+                self._stuck_ticks = 0
+                self._last_moved_win_pos = self.pos()
                 self.state = 'IDLE'
                 self.idle_ticks = 0
                 self.target_idle_ticks = random.randint(80, 160)
@@ -263,12 +416,32 @@ class FloatingSpider(QWidget):
             act_music.triggered.connect(self.open_music_callback)
             menu.addAction(act_music)
 
+        if self.toggle_mini_music_callback:
+            act_mini = QAction("🎧 Floating Mini Player", menu)
+            act_mini.triggered.connect(self.toggle_mini_music_callback)
+            menu.addAction(act_mini)
+
         if self.toggle_board_callback:
             act_board = QAction("🖌️ Okum Screen Board", menu)
             act_board.triggered.connect(self.toggle_board_callback)
             menu.addAction(act_board)
 
         menu.addSeparator()
+
+        # Ghost Mode / Transparency Selector
+        opacity_menu = menu.addMenu("👻 Ghost Mode & Opacity")
+        opacities = [
+            ("Ghost (30%)", 0.30),
+            ("Translucent (50% - Gentle)", 0.50),
+            ("Subtle (70%)", 0.70),
+            ("Solid (100%)", 1.0),
+        ]
+        for label, val in opacities:
+            act = QAction(label, opacity_menu)
+            act.setCheckable(True)
+            act.setChecked(abs(self.base_opacity - val) < 0.05)
+            act.triggered.connect(lambda checked, v=val: self.set_mascot_opacity(v))
+            opacity_menu.addAction(act)
 
         roam_label = "⏸️ Pause Crawling" if self.free_roam_enabled else "▶️ Resume Crawling"
         act_roam = QAction(roam_label, menu)
@@ -278,6 +451,12 @@ class FloatingSpider(QWidget):
         act_reset = QAction("📌 Reset to Corner", menu)
         act_reset.triggered.connect(self.position_initial)
         menu.addAction(act_reset)
+
+        if self.exit_callback:
+            menu.addSeparator()
+            act_exit = QAction("❌ Exit Okum", menu)
+            act_exit.triggered.connect(self.exit_callback)
+            menu.addAction(act_exit)
 
         menu.exec(global_pos)
 
@@ -290,6 +469,7 @@ class FloatingSpider(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setOpacity(self.current_opacity)
 
         # Center and orientation
         cx = self.width() / 2.0
@@ -440,24 +620,76 @@ class FloatingSpider(QWidget):
         ab_rx = 11.5
         ab_ry = 14.5 + math.sin(self.breathe_phase * 0.6) * 0.4
 
+        # Calculate dynamic bioluminescent glow (active when windows are open, music is playing, or voice active)
+        eff_glow = 0.0
+        if self.abdomen_glow > 0.005:
+            glow_pulse = math.sin(self.breathe_phase * 1.4) * 0.12 + 0.88
+            eff_glow = self.abdomen_glow * glow_pulse
+
+            # Select aura & rim colors based on voice state
+            if self.voice_state == "LISTENING":
+                base_c = QColor(6, 182, 212)    # Electric Cyan
+                high_c = QColor(103, 232, 249)
+            elif self.voice_state == "THINKING":
+                base_c = QColor(245, 158, 11)   # Warm Amber / Gold
+                high_c = QColor(252, 211, 77)
+            elif self.voice_state == "SPEAKING":
+                base_c = QColor(217, 70, 239)   # Vibrant Fuchsia / Pink
+                high_c = QColor(240, 171, 252)
+            else:
+                base_c = QColor(99, 102, 241)   # Deep Indigo
+                high_c = QColor(129, 140, 248)
+
+            # Soft diffuse ambient aura behind abdomen
+            halo_path = QPainterPath()
+            halo_path.addEllipse(QPointF(0, ab_y), ab_rx + 5.5 * eff_glow, ab_ry + 5.5 * eff_glow)
+            halo_grad = QRadialGradient(0, ab_y, ab_ry + 5.5 * eff_glow)
+            halo_grad.setColorAt(0.0, QColor(base_c.red(), base_c.green(), base_c.blue(), int(64 * eff_glow)))
+            halo_grad.setColorAt(0.65, QColor(base_c.red(), base_c.green(), base_c.blue(), int(22 * eff_glow)))
+            halo_grad.setColorAt(1.0, QColor(base_c.red(), base_c.green(), base_c.blue(), 0))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(halo_grad)
+            painter.drawPath(halo_path)
+        else:
+            base_c = QColor(99, 102, 241)
+            high_c = QColor(129, 140, 248)
+
         ab_path = QPainterPath()
         ab_path.addEllipse(QPointF(0, ab_y), ab_rx, ab_ry)
 
         ab_grad = QRadialGradient(-2.5, ab_y - 4.0, 16.0)
-        ab_grad.setColorAt(0.0, QColor(36, 42, 68))     # Deep navy-indigo highlight
-        ab_grad.setColorAt(0.55, QColor(18, 22, 36))    # Sleek dark chitin
-        ab_grad.setColorAt(1.0, QColor(9, 11, 18))      # Near obsidian rim
+        if eff_glow > 0.005:
+            r0 = int(36 + (base_c.red() - 36) * 0.4 * eff_glow)
+            g0 = int(42 + (base_c.green() - 42) * 0.4 * eff_glow)
+            b0 = int(68 + (base_c.blue() - 68) * 0.4 * eff_glow)
+            ab_grad.setColorAt(0.0, QColor(r0, g0, b0))
+            ab_grad.setColorAt(0.55, QColor(18, 22, 36))
+            ab_grad.setColorAt(1.0, QColor(9, 11, 18))
 
-        painter.setPen(QPen(QColor(99, 102, 241, 110), 1.2)) # Subtle sleek indigo rim
+            rim_alpha = int(110 + 90 * eff_glow)
+            painter.setPen(QPen(QColor(high_c.red(), high_c.green(), high_c.blue(), rim_alpha), 1.2 + 0.3 * eff_glow))
+        else:
+            ab_grad.setColorAt(0.0, QColor(36, 42, 68))     # Deep navy-indigo highlight
+            ab_grad.setColorAt(0.55, QColor(18, 22, 36))    # Sleek dark chitin
+            ab_grad.setColorAt(1.0, QColor(9, 11, 18))      # Near obsidian rim
+            painter.setPen(QPen(QColor(99, 102, 241, 110), 1.2)) # Subtle sleek indigo rim
+
         painter.setBrush(ab_grad)
         painter.drawPath(ab_path)
 
-        # Subtle dorsal specular gleam on abdomen (gives 3D curvature)
+        # Subtle dorsal specular gleam / bioluminescent core
         gleam_path = QPainterPath()
         gleam_path.addEllipse(QPointF(-2.0, ab_y - 5.0), 4.5, 6.0)
         gleam_grad = QRadialGradient(-2.0, ab_y - 5.0, 6.0)
-        gleam_grad.setColorAt(0.0, QColor(129, 140, 248, 50))
-        gleam_grad.setColorAt(1.0, QColor(129, 140, 248, 0))
+        if eff_glow > 0.005:
+            alpha_gleam = int(50 + 110 * eff_glow)
+            gleam_grad.setColorAt(0.0, QColor(high_c.red(), high_c.green(), high_c.blue(), alpha_gleam))
+            gleam_grad.setColorAt(0.65, QColor(base_c.red(), base_c.green(), base_c.blue(), int(32 * eff_glow)))
+            gleam_grad.setColorAt(1.0, QColor(base_c.red(), base_c.green(), base_c.blue(), 0))
+        else:
+            gleam_grad.setColorAt(0.0, QColor(129, 140, 248, 50))
+            gleam_grad.setColorAt(1.0, QColor(129, 140, 248, 0))
+
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(gleam_grad)
         painter.drawPath(gleam_path)

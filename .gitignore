@@ -20,3 +20,7 @@ env/
 .DS_Store
 *.swp
 *~
+
+# Temporary scratch tests and test images
+scratch/*.png
+scratch/test_*.py

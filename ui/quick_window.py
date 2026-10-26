@@ -1,5 +1,9 @@
 from PyQt6.QtCore import Qt, QPoint, QRectF, QSize, QByteArray, QTimer
-from PyQt6.QtGui import QPainter, QColor, QPen, QTextDocument, QPixmap, QIcon, QFont
+from PyQt6.QtGui import (
+    QPainter, QColor, QPen, QTextDocument, QPixmap, QIcon, QFont,
+    QPainterPath, QLinearGradient, QBrush
+)
+from PyQt6.QtMultimedia import QMediaPlayer
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -7,13 +11,14 @@ from PyQt6.QtWidgets import (
     QScrollArea, QListWidget, QListWidgetItem, QSlider, QComboBox
 )
 
-from services.ai_service import AIQueryWorker
-from services.music_service import MusicService, format_time_ms
-from ui.board_window import OkumBoardManager
-
+import math
 import os
 import html
 import markdown
+
+from services.ai_service import AIQueryWorker
+from services.music_service import MusicService, format_time_ms, CoverArtCache
+from ui.board_window import OkumBoardManager
 
 # Drawn SVG Vector Icons
 SVG_NOTE = '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'
@@ -36,6 +41,7 @@ SVG_REPEAT = '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h
 SVG_REPEAT_ONE = '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/><text x="10" y="15" font-size="7" font-weight="bold" fill="#ffffff" stroke="none">1</text>'
 SVG_REFRESH = '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>'
 SVG_SEARCH = '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'
+SVG_MINI_PLAYER = '<rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="10" width="7" height="6" rx="1"/>'
 
 def create_svg_icon(svg_inner, stroke_color='#f3f4f6', fill_color='none', size=18, stroke_width=2):
     svg_xml = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24" fill="{fill_color}" stroke="{stroke_color}" stroke-width="{stroke_width}" stroke-linecap="round" stroke-linejoin="round">
@@ -64,6 +70,55 @@ def format_chat_text(text):
     except Exception:
         escaped = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
         return f"<p style='margin:0;'>{escaped}</p>"
+
+class NowPlayingHeroCard(QFrame):
+    """
+    Sleek, hardware-accelerated hero card displaying an ultra-fast, low-blur
+    semi-transparent cover art wallpaper with dark glassmorphic vignette.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("nowPlayingCard")
+        self._bg_wallpaper = None
+
+    def set_wallpaper_pixmap(self, pixmap):
+        self._bg_wallpaper = pixmap
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        rect = self.rect()
+        card_w, card_h = rect.width(), rect.height()
+
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0.5, 0.5, card_w - 1, card_h - 1), 12.0, 12.0)
+        painter.setClipPath(path)
+
+        # 1. Base dark obsidian/indigo backdrop
+        painter.fillRect(QRectF(0, 0, card_w, card_h), QColor(14, 17, 28, 255))
+
+        # 2. Subtle low-blur, transparent cover art wallpaper
+        if self._bg_wallpaper and not self._bg_wallpaper.isNull():
+            painter.setOpacity(0.24)
+            dx = (card_w - self._bg_wallpaper.width()) // 2
+            dy = (card_h - self._bg_wallpaper.height()) // 2
+            painter.drawPixmap(dx, dy, self._bg_wallpaper)
+
+        # 3. Delicate vignette overlay for 100% text/control legibility
+        painter.setOpacity(1.0)
+        grad = QLinearGradient(0, 0, 0, card_h)
+        grad.setColorAt(0.0, QColor(14, 17, 28, 65))
+        grad.setColorAt(0.55, QColor(14, 17, 28, 120))
+        grad.setColorAt(1.0, QColor(10, 12, 22, 215))
+        painter.fillRect(QRectF(0, 0, card_w, card_h), grad)
+
+        # 4. Refined subtle border
+        painter.setPen(QPen(QColor(99, 102, 241, 95), 1.2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(0.5, 0.5, card_w - 1, card_h - 1), 12.0, 12.0)
 
 class QuickWindow(QWidget):
     PAGE_SIZE = 50
@@ -487,33 +542,105 @@ class QuickWindow(QWidget):
         music_layout.setContentsMargins(0, 2, 0, 0)
         music_layout.setSpacing(8)
 
-        # 1. Now Playing Mini Card
-        self.card_playing = QFrame(self.page_music)
-        self.card_playing.setObjectName("nowPlayingCard")
+        # 1. Now Playing Glassmorphic Mini Card with Dynamic Blurred Cover Art Wallpaper
+        self.card_playing = NowPlayingHeroCard(self.page_music)
+        self.card_playing.setStyleSheet("""
+            QFrame#nowPlayingCard {
+                background: transparent;
+                border: none;
+            }
+        """)
+        self.card_playing.set_wallpaper_pixmap(CoverArtCache.get_hero_wallpaper(None))
         card_layout = QVBoxLayout(self.card_playing)
         card_layout.setContentsMargins(10, 8, 10, 8)
         card_layout.setSpacing(6)
 
-        # Top Track Header
+        # Top Track Header (Cover Art + Text + Fav/Status)
         track_info_layout = QHBoxLayout()
-        track_info_layout.setSpacing(8)
+        track_info_layout.setSpacing(10)
+
+        # Rounded Cover Art Thumbnail (50x50)
+        self.lbl_cover_art = QLabel(self.card_playing)
+        self.lbl_cover_art.setFixedSize(50, 50)
+        self.lbl_cover_art.setStyleSheet("border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.15);")
+        self.lbl_cover_art.setScaledContents(True)
+        self.lbl_cover_art.setPixmap(CoverArtCache.get_default_pixmap(50))
+        track_info_layout.addWidget(self.lbl_cover_art)
 
         track_text_col = QVBoxLayout()
-        track_text_col.setSpacing(1)
+        track_text_col.setSpacing(2)
         self.lbl_music_track = QLabel("No track playing", self.card_playing)
-        self.lbl_music_track.setStyleSheet("font-size: 13px; font-weight: bold; color: #ffffff;")
-        self.lbl_music_artist = QLabel("Quick Play • ~/Music", self.card_playing)
-        self.lbl_music_artist.setStyleSheet("font-size: 11px; color: #38bdf8;")
+        self.lbl_music_track.setStyleSheet("background: transparent; font-size: 13px; font-weight: bold; color: #ffffff;")
+        self.lbl_music_artist = QLabel("Quick Play • Ready", self.card_playing)
+        self.lbl_music_artist.setStyleSheet("background: transparent; font-size: 11px; color: #38bdf8;")
 
         track_text_col.addWidget(self.lbl_music_track)
         track_text_col.addWidget(self.lbl_music_artist)
-        track_info_layout.addLayout(track_text_col)
-        track_info_layout.addStretch()
+        track_info_layout.addLayout(track_text_col, 1)
+
+        # Right badges & actions
+        right_status_col = QVBoxLayout()
+        right_status_col.setSpacing(3)
+        right_status_col.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        top_actions_row = QHBoxLayout()
+        top_actions_row.setSpacing(4)
+        top_actions_row.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        # Up Next Priority Queue Badge with Clear Action
+        self.btn_queue_badge = QPushButton("Up Next: 0 ✕", self.card_playing)
+        self.btn_queue_badge.setStyleSheet("""
+            QPushButton {
+                font-size: 9px; font-weight: bold;
+                background: rgba(245, 158, 11, 0.22); color: #fbbf24;
+                border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 6px;
+                padding: 1px 5px;
+            }
+            QPushButton:hover {
+                background: rgba(239, 68, 68, 0.3); color: #fca5a5;
+                border-color: rgba(239, 68, 68, 0.6);
+            }
+        """)
+        self.btn_queue_badge.setToolTip("Click to clear Up Next queue")
+        self.btn_queue_badge.clicked.connect(self.music_service.clear_up_next)
+        self.btn_queue_badge.hide()
+        top_actions_row.addWidget(self.btn_queue_badge)
+
+        # Favorite Heart Toggle on Card
+        self.btn_now_playing_fav = QPushButton("♡", self.card_playing)
+        self.btn_now_playing_fav.setFixedSize(22, 22)
+        self.btn_now_playing_fav.setStyleSheet("background: transparent; border: none; font-size: 14px; color: #9ca3af;")
+        self.btn_now_playing_fav.setToolTip("Toggle Favorite")
+        self.btn_now_playing_fav.clicked.connect(self._on_toggle_current_favorite)
+        top_actions_row.addWidget(self.btn_now_playing_fav)
+
+        # Floating Mini Player Toggle Button (PiP Mode)
+        self.btn_mini_player = QPushButton(self.card_playing)
+        self.btn_mini_player.setIcon(create_svg_icon(SVG_MINI_PLAYER, stroke_color="#9ca3af", size=13))
+        self.btn_mini_player.setIconSize(QSize(13, 13))
+        self.btn_mini_player.setFixedSize(22, 22)
+        self.btn_mini_player.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background: rgba(99, 102, 241, 0.25);
+            }
+        """)
+        self.btn_mini_player.setToolTip("Floating Mini Player (Switch to compact floating widget)")
+        self.btn_mini_player.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_mini_player.clicked.connect(self._open_floating_mini_player)
+        top_actions_row.addWidget(self.btn_mini_player)
+
+        right_status_col.addLayout(top_actions_row)
 
         self.lbl_music_status_pill = QLabel("Ready", self.card_playing)
         self.lbl_music_status_pill.setStyleSheet("font-size: 10px; font-weight: bold; background: rgba(99, 102, 241, 0.25); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.4); border-radius: 6px; padding: 2px 6px;")
-        track_info_layout.addWidget(self.lbl_music_status_pill)
+        right_status_col.addWidget(self.lbl_music_status_pill)
 
+        track_info_layout.addLayout(right_status_col)
         card_layout.addLayout(track_info_layout)
 
         # Progress Scrub Bar
@@ -521,7 +648,7 @@ class QuickWindow(QWidget):
         progress_layout.setSpacing(8)
 
         self.lbl_time_cur = QLabel("00:00", self.card_playing)
-        self.lbl_time_cur.setStyleSheet("font-size: 10px; color: #9ca3af; font-family: monospace;")
+        self.lbl_time_cur.setStyleSheet("background: transparent; font-size: 10px; color: #9ca3af; font-family: monospace;")
 
         self.slider_progress = QSlider(Qt.Orientation.Horizontal, self.card_playing)
         self.slider_progress.setRange(0, 1000)
@@ -531,7 +658,7 @@ class QuickWindow(QWidget):
         self.slider_progress.sliderMoved.connect(self._on_seek_moved)
 
         self.lbl_time_total = QLabel("00:00", self.card_playing)
-        self.lbl_time_total.setStyleSheet("font-size: 10px; color: #9ca3af; font-family: monospace;")
+        self.lbl_time_total.setStyleSheet("background: transparent; font-size: 10px; color: #9ca3af; font-family: monospace;")
 
         progress_layout.addWidget(self.lbl_time_cur)
         progress_layout.addWidget(self.slider_progress)
@@ -606,6 +733,23 @@ class QuickWindow(QWidget):
         self.txt_music_search.textChanged.connect(self._on_search_text_changed)
         search_box.addWidget(self.txt_music_search)
 
+        self.btn_play_all_search = QPushButton("▶ All", self.page_music)
+        self.btn_play_all_search.setToolTip("Play all search results back-to-back")
+        self.btn_play_all_search.setStyleSheet("""
+            QPushButton {
+                font-size: 11px; font-weight: bold;
+                background: rgba(99, 102, 241, 0.28); color: #c7d2fe;
+                border: 1px solid rgba(99, 102, 241, 0.5); border-radius: 6px;
+                padding: 4px 8px;
+            }
+            QPushButton:hover {
+                background: rgba(99, 102, 241, 0.45); color: #ffffff;
+            }
+        """)
+        self.btn_play_all_search.clicked.connect(self._play_all_search_results)
+        self.btn_play_all_search.hide()
+        search_box.addWidget(self.btn_play_all_search)
+
         self.btn_clear_search = QPushButton(self.page_music)
         self.btn_clear_search.setIcon(create_svg_icon(SVG_CLOSE, stroke_color="#9ca3af", size=14))
         self.btn_clear_search.setObjectName("btnPlayerControl")
@@ -615,6 +759,10 @@ class QuickWindow(QWidget):
         search_box.addWidget(self.btn_clear_search)
 
         music_layout.addLayout(search_box)
+
+        # Active filter state (default is full library, space reclaimed for music list)
+        self.active_music_filter = 'all'
+        self.filter_buttons = {}
 
         # 3. Paginated Track List Box
         self.lst_music = QListWidget(self.page_music)
@@ -674,8 +822,8 @@ class QuickWindow(QWidget):
         self.btn_rescan.setIconSize(QSize(14, 14))
         self.btn_rescan.setFixedSize(26, 26)
         self.btn_rescan.setObjectName("btnPlayerControl")
-        self.btn_rescan.setToolTip("Rescan ~/Music library")
-        self.btn_rescan.clicked.connect(self.music_service.scan_library_fast)
+        self.btn_rescan.setToolTip("Rescan library (checks ~/Downloads, ~/Music & ETS2 for new songs)")
+        self.btn_rescan.clicked.connect(self._on_rescan_clicked)
         pagination_layout.addWidget(self.btn_rescan)
 
         music_layout.addLayout(pagination_layout)
@@ -1050,6 +1198,87 @@ class QuickWindow(QWidget):
         self.music_service.library_scanned.connect(self._on_library_scanned)
         self.music_service.track_unavailable.connect(self._on_track_unavailable)
         self.music_service.error_occurred.connect(self._on_player_error_occurred)
+        self.music_service.queue_changed.connect(self._on_queue_changed)
+        self.music_service.favorite_changed.connect(self._on_favorite_changed)
+
+        if self.music_service.current_track:
+            self._on_track_changed(self.music_service.current_track)
+        else:
+            self._on_track_changed(None)
+
+    def _on_queue_changed(self, count):
+        if count > 0:
+            self.btn_queue_badge.setText(f"Up Next: {count} ✕")
+            self.btn_queue_badge.show()
+        else:
+            self.btn_queue_badge.hide()
+
+    def _on_favorite_changed(self, filepath, is_fav):
+        if self.music_service.current_track and self.music_service.current_track.get('filepath') == filepath:
+            self.btn_now_playing_fav.setText("❤️" if is_fav else "♡")
+            self.btn_now_playing_fav.setStyleSheet(f"background: transparent; border: none; font-size: 14px; color: {'#ec4899' if is_fav else '#9ca3af'};")
+
+        # If currently filtered by favorites, refresh view
+        if getattr(self, 'active_music_filter', 'all') == 'favorites':
+            self._load_music_library()
+
+    def _on_toggle_current_favorite(self):
+        is_fav = self.music_service.toggle_favorite()
+        self.btn_now_playing_fav.setText("❤️" if is_fav else "♡")
+        self.btn_now_playing_fav.setStyleSheet(f"background: transparent; border: none; font-size: 14px; color: {'#ec4899' if is_fav else '#9ca3af'};")
+
+    def _get_chip_style(self, is_active):
+        if is_active:
+            return """
+                QPushButton {
+                    background: rgba(99, 102, 241, 0.35);
+                    border: 1px solid rgba(129, 140, 248, 0.65);
+                    border-radius: 11px;
+                    color: #ffffff;
+                    font-size: 10px;
+                    font-weight: bold;
+                    padding: 3px 8px;
+                }
+            """
+        else:
+            return """
+                QPushButton {
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 11px;
+                    color: #9ca3af;
+                    font-size: 10px;
+                    padding: 3px 8px;
+                }
+                QPushButton:hover {
+                    background: rgba(255, 255, 255, 0.1);
+                    color: #f3f4f6;
+                    border-color: rgba(255, 255, 255, 0.2);
+                }
+            """
+
+    def _on_filter_chip_clicked(self, fid):
+        # One-tap clear: tapping active chip again resets to 'all'
+        if self.active_music_filter == fid and fid != 'all':
+            self.active_music_filter = 'all'
+        else:
+            self.active_music_filter = fid
+
+        for f_key, btn in self.filter_buttons.items():
+            is_active = (f_key == self.active_music_filter)
+            btn.setChecked(is_active)
+            btn.setStyleSheet(self._get_chip_style(is_active))
+
+        self.music_page = 1
+        self._load_music_library()
+
+    def _play_all_search_results(self):
+        query = self.txt_music_search.text().strip()
+        if not query:
+            return
+        all_results = self.db.get_all_tracks_for_playback(query=query, filter_type=self.active_music_filter)
+        if all_results:
+            self.music_service.play_track(all_results[0], playlist=all_results)
 
     def _on_track_unavailable(self, track_dict, reason):
         self.lbl_music_status_pill.setText("File Skipped")
@@ -1063,7 +1292,8 @@ class QuickWindow(QWidget):
 
     def _load_music_library(self):
         query = self.txt_music_search.text().strip()
-        self.total_music_count = self.db.get_music_tracks_count(query)
+        f_type = getattr(self, 'active_music_filter', 'all')
+        self.total_music_count = self.db.get_music_tracks_count(query, filter_type=f_type)
         self.total_music_pages = max(1, (self.total_music_count + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
         
         if self.music_page > self.total_music_pages:
@@ -1071,55 +1301,143 @@ class QuickWindow(QWidget):
         if self.music_page < 1:
             self.music_page = 1
 
+        # Show/hide "Play All" button for search results
+        if query and self.total_music_count > 0:
+            self.btn_play_all_search.setText(f"▶ All ({self.total_music_count})")
+            self.btn_play_all_search.show()
+        else:
+            self.btn_play_all_search.hide()
+
         offset = (self.music_page - 1) * self.PAGE_SIZE
-        self.current_displayed_tracks = self.db.search_music_tracks(query, limit=self.PAGE_SIZE, offset=offset)
+        self.current_displayed_tracks = self.db.search_music_tracks(query, filter_type=f_type, limit=self.PAGE_SIZE, offset=offset)
 
         self.lst_music.clear()
         curr_p = self.music_service.current_track.get('filepath') if self.music_service.current_track else None
 
         for track in self.current_displayed_tracks:
-            is_playing_item = (curr_p and track['filepath'] == curr_p)
-            dur_str = format_time_ms(track.get('duration', 0)) if track.get('duration') else ""
-            dur_info = f" • {dur_str}" if dur_str and dur_str != "00:00" else ""
-            
-            raw_title = (track.get('title') or '').strip()
-            if not raw_title:
-                raw_title = os.path.splitext(track.get('filename') or '')[0].replace('_', ' ')
-            raw_artist = (track.get('artist') or '').strip() or "Local Music"
-
-            safe_title = html.escape(raw_title)
-            safe_artist = html.escape(raw_artist)
-
-            icon_tag = '<span style="background: rgba(99, 102, 241, 0.3); color: #a5b4fc; font-size: 9px; font-weight: bold; border-radius: 3px; padding: 1px 4px; margin-right: 5px;">PLAYING</span>' if is_playing_item else ""
-            color_tag = "#a5b4fc" if is_playing_item else "#f3f4f6"
-            
-            item_html = f"""
-            <div style="line-height: 1.25;">
-                <div style="font-size: 12px; font-weight: bold; color: {color_tag}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    {icon_tag}{safe_title}
-                </div>
-                <div style="font-size: 10px; color: #9ca3af;">
-                    {safe_artist}{dur_info}
-                </div>
-            </div>
-            """
-            lbl = QLabel(item_html)
-            lbl.setStyleSheet("background: transparent;")
-            lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-
+            item_widget = self._create_track_row_widget(track, curr_p)
             item = QListWidgetItem()
-            item.setSizeHint(QSize(340, 38))
+            item.setSizeHint(QSize(340, 46))
             item.setData(Qt.ItemDataRole.UserRole, track)
             self.lst_music.addItem(item)
-            self.lst_music.setItemWidget(item, lbl)
+            self.lst_music.setItemWidget(item, item_widget)
 
-            if is_playing_item:
+            if curr_p and track.get('filepath') == curr_p:
                 self.lst_music.setCurrentItem(item)
 
         # Update page navigation state
-        self.lbl_music_page_info.setText(f"Page {self.music_page} of {self.total_music_pages} ({self.total_music_count:,} tracks • ~/Music & ETS2)")
+        self.lbl_music_page_info.setText(f"Page {self.music_page} of {self.total_music_pages} ({self.total_music_count:,} songs)")
         self.btn_music_prev.setEnabled(self.music_page > 1)
         self.btn_music_next.setEnabled(self.music_page < self.total_music_pages)
+
+    def _create_track_row_widget(self, track, curr_p):
+        is_playing = bool(curr_p and track.get('filepath') == curr_p)
+        fp = track.get('filepath', '')
+
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setSpacing(8)
+
+        # Micro Album Art Thumbnail (32x32)
+        lbl_art = QLabel(widget)
+        lbl_art.setFixedSize(32, 32)
+        lbl_art.setStyleSheet("border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.08);")
+        lbl_art.setScaledContents(True)
+        lbl_art.setPixmap(CoverArtCache.get_cover_pixmap(fp, size=32))
+        layout.addWidget(lbl_art)
+
+        # Title & Artist Text Column
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        col.setContentsMargins(0, 0, 0, 0)
+
+        raw_title = (track.get('title') or '').strip()
+        if not raw_title:
+            raw_title = os.path.splitext(track.get('filename') or '')[0].replace('_', ' ')
+        raw_artist = (track.get('artist') or '').strip() or "Local Music"
+        play_count = track.get('play_count', 0) or 0
+        plays_str = f" • {play_count} {'play' if play_count == 1 else 'plays'}" if play_count > 0 else ""
+
+        lbl_title = QLabel(raw_title, widget)
+        title_color = "#a5b4fc" if is_playing else "#f3f4f6"
+        lbl_title.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {title_color};")
+        lbl_title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        lbl_artist = QLabel(f"{raw_artist}{plays_str}", widget)
+        lbl_artist.setStyleSheet("font-size: 10px; color: #9ca3af;")
+        lbl_artist.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        col.addWidget(lbl_title)
+        col.addWidget(lbl_artist)
+        layout.addLayout(col, 1)
+
+        # Duration
+        dur_str = format_time_ms(track.get('duration', 0)) if track.get('duration') else ""
+        if dur_str and dur_str != "00:00":
+            lbl_dur = QLabel(dur_str, widget)
+            lbl_dur.setStyleSheet("font-size: 10px; color: #6b7280; font-family: monospace;")
+            lbl_dur.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            layout.addWidget(lbl_dur)
+
+        # Up Next "+" Button
+        btn_add = QPushButton("+", widget)
+        btn_add.setFixedSize(22, 22)
+        btn_add.setToolTip("Play Next (Add to Queue)")
+        btn_add.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 4px;
+                color: #d1d5db;
+                font-size: 13px;
+                font-weight: bold;
+                padding-bottom: 2px;
+            }
+            QPushButton:hover {
+                background: rgba(99, 102, 241, 0.35);
+                border-color: #6366f1;
+                color: #ffffff;
+            }
+        """)
+        btn_add.clicked.connect(lambda checked, t=track: self.music_service.add_to_up_next(t))
+        layout.addWidget(btn_add)
+
+        # Heart Favorite Button
+        is_fav = bool(track.get('is_favorite', 0))
+        btn_fav = QPushButton("❤️" if is_fav else "♡", widget)
+        btn_fav.setFixedSize(22, 22)
+        btn_fav.setToolTip("Toggle Favorite")
+        btn_fav.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: none;
+                font-size: 12px;
+                color: {'#ec4899' if is_fav else '#6b7280'};
+            }}
+            QPushButton:hover {{
+                color: #ec4899;
+            }}
+        """)
+        btn_fav.clicked.connect(lambda checked, t=track, b=btn_fav: self._toggle_track_fav_row(t, b))
+        layout.addWidget(btn_fav)
+
+        return widget
+
+    def _toggle_track_fav_row(self, track, btn):
+        is_fav = self.music_service.toggle_favorite(track)
+        btn.setText("❤️" if is_fav else "♡")
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: none;
+                font-size: 12px;
+                color: {'#ec4899' if is_fav else '#6b7280'};
+            }}
+            QPushButton:hover {{
+                color: #ec4899;
+            }}
+        """)
 
     def _on_search_text_changed(self, text):
         self.music_page = 1
@@ -1137,29 +1455,50 @@ class QuickWindow(QWidget):
 
     def _on_track_item_clicked(self, item):
         track_data = item.data(Qt.ItemDataRole.UserRole)
-        if track_data:
-            self.music_service.play_track(track_data, self.current_displayed_tracks)
+        if not track_data:
+            return
+
+        query = self.txt_music_search.text().strip()
+        if query:
+            # Single search result requested: plays once, resumes main collection when done!
+            self.music_service.play_track(track_data, is_single_request=True)
+        else:
+            # Human is browsing: pass all tracks for active filter so shuffle has the full cosmic library pool!
+            pool = self.db.get_all_tracks_for_playback(filter_type=getattr(self, 'active_music_filter', 'all'))
+            self.music_service.play_track(track_data, playlist=pool)
 
     def _on_track_changed(self, track):
         if not track:
             self.lbl_music_track.setText("No track playing")
-            self.lbl_music_artist.setText("Quick Play • ~/Music")
+            self.lbl_music_artist.setText("Quick Play • Ready")
+            self.lbl_cover_art.setPixmap(CoverArtCache.get_default_pixmap(50))
+            self.card_playing.set_wallpaper_pixmap(CoverArtCache.get_hero_wallpaper(None))
+            self.btn_now_playing_fav.setText("♡")
             return
 
         title = track.get('title') or track.get('filename')
         artist = track.get('artist') or "Unknown Artist"
-        
-        # Elide long title if necessary
+        fp = track.get('filepath', '')
+
         self.lbl_music_track.setText(title)
         self.lbl_music_artist.setText(f"{artist} • {track.get('ext', '')}")
         self.lbl_music_status_pill.setText("Playing")
         self.lbl_music_status_pill.setStyleSheet("font-size: 10px; font-weight: bold; background: rgba(16, 185, 129, 0.25); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 6px; padding: 2px 6px;")
 
-        # Highlight in current list if visible
+        # Update Cover Art Thumbnail & Low-Blur Transparent Wallpaper
+        self.lbl_cover_art.setPixmap(CoverArtCache.get_cover_pixmap(fp, size=50))
+        self.card_playing.set_wallpaper_pixmap(CoverArtCache.get_hero_wallpaper(fp))
+
+        # Update Favorite Heart Button
+        is_fav = self.music_service.is_favorite(fp)
+        self.btn_now_playing_fav.setText("❤️" if is_fav else "♡")
+        self.btn_now_playing_fav.setStyleSheet(f"background: transparent; border: none; font-size: 14px; color: {'#ec4899' if is_fav else '#9ca3af'};")
+
+        # Highlight in current visible list
         for i in range(self.lst_music.count()):
             item = self.lst_music.item(i)
             t = item.data(Qt.ItemDataRole.UserRole)
-            if t and t['filepath'] == track['filepath']:
+            if t and t.get('filepath') == fp:
                 self.lst_music.setCurrentItem(item)
                 break
 
@@ -1218,12 +1557,38 @@ class QuickWindow(QWidget):
             self.btn_loop.setToolTip("Loop Mode: Off")
             self.btn_loop.setStyleSheet("")
 
+    def _on_rescan_clicked(self):
+        self.lbl_music_status_pill.setText("Scanning...")
+        self.lbl_music_status_pill.setStyleSheet("font-size: 10px; font-weight: bold; background: rgba(56, 189, 248, 0.25); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 6px; padding: 2px 6px;")
+        self.music_service.scan_library_fast()
+
     def _on_library_scanned(self, total_count):
         self._load_music_library()
+        if self.music_service.current_track and hasattr(self.music_service, 'player') and self.music_service.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.lbl_music_status_pill.setText("Playing")
+            self.lbl_music_status_pill.setStyleSheet("font-size: 10px; font-weight: bold; background: rgba(16, 185, 129, 0.25); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 6px; padding: 2px 6px;")
+        elif self.music_service.current_track:
+            self.lbl_music_status_pill.setText("Paused")
+            self.lbl_music_status_pill.setStyleSheet("font-size: 10px; font-weight: bold; background: rgba(245, 158, 11, 0.25); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 6px; padding: 2px 6px;")
+        else:
+            self.lbl_music_status_pill.setText("Ready")
+            self.lbl_music_status_pill.setStyleSheet("font-size: 10px; font-weight: bold; background: rgba(99, 102, 241, 0.25); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.4); border-radius: 6px; padding: 2px 6px;")
 
     def _on_expand_dashboard(self):
         self.hide()
         self.open_dashboard_callback()
+
+    def _open_floating_mini_player(self):
+        from ui.floating_music_window import FloatingMusicWindow
+        self.hide()
+        FloatingMusicWindow.get_instance(self._restore_from_mini_player).show_player()
+
+    def _restore_from_mini_player(self):
+        self.tab_group.button(2).setChecked(True)
+        self._switch_tab(2)
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
 # Alias for backwards compatibility
 QuickNotepad = QuickWindow

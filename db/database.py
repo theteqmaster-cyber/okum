@@ -65,12 +65,30 @@ class Database:
                     album TEXT,
                     duration INTEGER DEFAULT 0,
                     ext TEXT,
+                    is_favorite INTEGER DEFAULT 0,
+                    play_count INTEGER DEFAULT 0,
+                    last_played_at TEXT,
                     updated_at TEXT NOT NULL
                 )
             ''')
+            try:
+                conn.execute('ALTER TABLE music_tracks ADD COLUMN is_favorite INTEGER DEFAULT 0')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE music_tracks ADD COLUMN play_count INTEGER DEFAULT 0')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE music_tracks ADD COLUMN last_played_at TEXT')
+            except sqlite3.OperationalError:
+                pass
+            conn.execute('UPDATE music_tracks SET play_count = 0 WHERE play_count IS NULL')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_music_title ON music_tracks(title)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_music_artist ON music_tracks(artist)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_music_filename ON music_tracks(filename)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_music_favorite ON music_tracks(is_favorite)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_music_play_count ON music_tracks(play_count DESC, last_played_at DESC)')
             conn.commit()
 
         # Seed sample note if database is empty
@@ -274,33 +292,121 @@ class Database:
             ''', (title, artist, album, duration, now, filepath))
             conn.commit()
 
-    def search_music_tracks(self, query=None, limit=50, offset=0):
-        sql = "SELECT * FROM music_tracks"
+    def search_music_tracks(self, query=None, filter_type=None, limit=50, offset=0):
+        where_clauses = []
         params = []
         if query and query.strip():
-            sql += " WHERE title LIKE ? OR artist LIKE ? OR filename LIKE ? OR album LIKE ?"
+            where_clauses.append("(title LIKE ? OR artist LIKE ? OR filename LIKE ? OR album LIKE ?)")
             param_q = f"%{query.strip()}%"
             params.extend([param_q, param_q, param_q, param_q])
 
-        sql += " ORDER BY title COLLATE NOCASE ASC, artist COLLATE NOCASE ASC LIMIT ? OFFSET ?"
+        if filter_type == 'favorites':
+            where_clauses.append("is_favorite = 1")
+        elif filter_type == 'downloads':
+            where_clauses.append("(filepath LIKE '%/Downloads/%' OR filepath LIKE '%/downloads/%')")
+        elif filter_type == 'music':
+            where_clauses.append("(filepath LIKE '%/Music/%' OR filepath LIKE '%/music/%')")
+
+        sql = "SELECT * FROM music_tracks"
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
+
+        if filter_type == 'recent':
+            sql += " ORDER BY COALESCE(last_played_at, updated_at) DESC, ROWID DESC"
+        else:
+            sql += " ORDER BY play_count DESC, last_played_at DESC, updated_at DESC, title COLLATE NOCASE ASC"
+
+        sql += " LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         with self._get_connection() as conn:
             cursor = conn.execute(sql, params)
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_music_tracks_count(self, query=None):
-        sql = "SELECT COUNT(*) as count FROM music_tracks"
+    def get_music_tracks_count(self, query=None, filter_type=None):
+        where_clauses = []
         params = []
         if query and query.strip():
-            sql += " WHERE title LIKE ? OR artist LIKE ? OR filename LIKE ? OR album LIKE ?"
+            where_clauses.append("(title LIKE ? OR artist LIKE ? OR filename LIKE ? OR album LIKE ?)")
             param_q = f"%{query.strip()}%"
             params.extend([param_q, param_q, param_q, param_q])
+
+        if filter_type == 'favorites':
+            where_clauses.append("is_favorite = 1")
+        elif filter_type == 'downloads':
+            where_clauses.append("(filepath LIKE '%/Downloads/%' OR filepath LIKE '%/downloads/%')")
+        elif filter_type == 'music':
+            where_clauses.append("(filepath LIKE '%/Music/%' OR filepath LIKE '%/music/%')")
+
+        sql = "SELECT COUNT(*) as count FROM music_tracks"
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
 
         with self._get_connection() as conn:
             cursor = conn.execute(sql, params)
             row = cursor.fetchone()
             return row['count'] if row else 0
+
+    def get_all_tracks_for_playback(self, query=None, filter_type=None):
+        """Returns all matching tracks for true library-wide playback and shuffle."""
+        where_clauses = []
+        params = []
+        if query and query.strip():
+            where_clauses.append("(title LIKE ? OR artist LIKE ? OR filename LIKE ? OR album LIKE ?)")
+            param_q = f"%{query.strip()}%"
+            params.extend([param_q, param_q, param_q, param_q])
+
+        if filter_type == 'favorites':
+            where_clauses.append("is_favorite = 1")
+        elif filter_type == 'downloads':
+            where_clauses.append("(filepath LIKE '%/Downloads/%' OR filepath LIKE '%/downloads/%')")
+        elif filter_type == 'music':
+            where_clauses.append("(filepath LIKE '%/Music/%' OR filepath LIKE '%/music/%')")
+
+        sql = "SELECT * FROM music_tracks"
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
+
+        if filter_type == 'recent':
+            sql += " ORDER BY COALESCE(last_played_at, updated_at) DESC, ROWID DESC"
+        else:
+            sql += " ORDER BY play_count DESC, last_played_at DESC, updated_at DESC, title COLLATE NOCASE ASC"
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(sql, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def record_track_play(self, filepath):
+        """Records playback history and increments play count for track."""
+        now = datetime.now().isoformat()
+        with self._get_connection() as conn:
+            conn.execute('''
+                UPDATE music_tracks
+                SET play_count = COALESCE(play_count, 0) + 1,
+                    last_played_at = ?
+                WHERE filepath = ?
+            ''', (now, filepath))
+            conn.commit()
+            cursor = conn.execute("SELECT play_count FROM music_tracks WHERE filepath = ?", (filepath,))
+            row = cursor.fetchone()
+            return row['play_count'] if row else 1
+
+    def toggle_track_favorite(self, filepath):
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT is_favorite FROM music_tracks WHERE filepath = ?", (filepath,))
+            row = cursor.fetchone()
+            new_val = 1
+            if row and row['is_favorite']:
+                new_val = 0
+            conn.execute("UPDATE music_tracks SET is_favorite = ? WHERE filepath = ?", (new_val, filepath))
+            conn.commit()
+            return bool(new_val)
+
+    def is_track_favorite(self, filepath):
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT is_favorite FROM music_tracks WHERE filepath = ?", (filepath,))
+            row = cursor.fetchone()
+            return bool(row['is_favorite']) if row and row['is_favorite'] else False
 
     def get_all_music_filepaths(self):
         with self._get_connection() as conn:

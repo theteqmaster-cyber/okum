@@ -1,7 +1,34 @@
 <?php
+if (session_status() === PHP_SESSION_NONE) {
+    session_save_path('/tmp');
+    session_start();
+}
+
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 $notesDir = '/home/mphatic/Documents/OkumNotes';
 $dbPath = '/home/mphatic/.local/share/okum/okum.db';
+
+// Handle Lock / Logout
+if (isset($_GET['lock']) || isset($_GET['logout'])) {
+    unset($_SESSION['okum_pin_unlocked']);
+    header('Location: index.php');
+    exit;
+}
+
+// Handle PIN Verification (AJAX)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'verify_pin') {
+    header('Content-Type: application/json');
+    $pin = trim($_POST['pin'] ?? '');
+    if ($pin === '2026') {
+        $_SESSION['okum_pin_unlocked'] = true;
+        echo json_encode(['status' => 'success']);
+    } else {
+        echo json_encode(['status' => 'error', 'message' => 'INCORRECT PIN']);
+    }
+    exit;
+}
+
+$is_unlocked = !empty($_SESSION['okum_pin_unlocked']);
 
 function getOkumNotes($notesDir, $dbPath) {
     $notes = [];
@@ -54,12 +81,18 @@ function getOkumNotes($notesDir, $dbPath) {
 }
 
 if (isset($_GET['api']) && $_GET['api'] === '1') {
+    if (!$is_unlocked) {
+        http_response_code(401);
+        header('Content-Type: application/json');
+        echo json_encode(['status' => 'error', 'message' => 'PIN authorization required.']);
+        exit;
+    }
     header('Content-Type: application/json');
     echo json_encode(['status' => 'success', 'notes' => getOkumNotes($notesDir, $dbPath)]);
     exit;
 }
 
-$allNotes = getOkumNotes($notesDir, $dbPath);
+$allNotes = $is_unlocked ? getOkumNotes($notesDir, $dbPath) : [];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -423,10 +456,189 @@ $allNotes = getOkumNotes($notesDir, $dbPath);
     ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
     ::-webkit-scrollbar-thumb:hover { background: #6366f1; }
+
+    /* Lock Button */
+    .btn-lock {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.28);
+      color: #f87171;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .btn-lock:hover {
+      background: rgba(239, 68, 68, 0.25);
+      border-color: #ef4444;
+      color: #fff;
+    }
+
+    /* PIN Gate Overlay & Screen */
+    .pin-gate-container {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at 50% 30%, rgba(99, 102, 241, 0.15), rgba(7, 9, 19, 0.98) 70%);
+      padding: 20px;
+      position: relative;
+    }
+    .pin-card {
+      background: rgba(15, 18, 30, 0.85);
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      border-radius: 20px;
+      padding: 36px 32px;
+      width: 100%;
+      max-width: 380px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(99, 102, 241, 0.15);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      text-align: center;
+      animation: fadeIn 0.4s ease-out;
+    }
+    .pin-icon-wrap {
+      width: 64px;
+      height: 64px;
+      border-radius: 18px;
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #a5b4fc;
+      margin-bottom: 18px;
+      box-shadow: 0 0 20px rgba(99, 102, 241, 0.25);
+    }
+    .pin-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .pin-subtitle {
+      font-size: 0.78rem;
+      color: #94a3b8;
+      font-family: 'JetBrains Mono', monospace;
+      margin-bottom: 24px;
+      letter-spacing: 0.5px;
+    }
+    .pin-dots {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .pin-dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid rgba(99, 102, 241, 0.5);
+      background: transparent;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .pin-dot.filled {
+      background: #818cf8;
+      border-color: #a5b4fc;
+      box-shadow: 0 0 12px rgba(129, 140, 248, 0.8);
+      transform: scale(1.15);
+    }
+    .pin-feedback {
+      min-height: 22px;
+      font-size: 0.78rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      margin-bottom: 18px;
+      color: #94a3b8;
+    }
+    .pin-feedback.error {
+      color: #f87171;
+    }
+    .pin-feedback.success {
+      color: #34d399;
+    }
+    .keypad-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      width: 100%;
+      max-width: 270px;
+      margin-bottom: 22px;
+    }
+    .key-btn {
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #f3f4f6;
+      font-size: 1.35rem;
+      font-weight: 600;
+      font-family: 'Outfit', sans-serif;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .key-btn:hover {
+      background: rgba(99, 102, 241, 0.2);
+      border-color: rgba(99, 102, 241, 0.5);
+      color: #fff;
+      transform: scale(1.05);
+    }
+    .key-btn:active {
+      transform: scale(0.95);
+      background: rgba(99, 102, 241, 0.35);
+    }
+    .key-btn.action-btn {
+      font-size: 0.85rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: #94a3b8;
+    }
+    .pin-footer-links {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+    .pin-back-link {
+      color: #818cf8;
+      text-decoration: none;
+      font-size: 0.8rem;
+      font-family: 'JetBrains Mono', monospace;
+      transition: color 0.2s;
+    }
+    .pin-back-link:hover {
+      color: #c7d2fe;
+      text-decoration: underline;
+    }
+    @keyframes pinShake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-8px); }
+      40%, 80% { transform: translateX(8px); }
+    }
+    .shake {
+      animation: pinShake 0.4s ease-in-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
   </style>
 </head>
 <body>
 
+<?php if ($is_unlocked): ?>
   <!-- Header Bar -->
   <header class="header-bar">
     <div class="brand-title">
@@ -452,6 +664,13 @@ $allNotes = getOkumNotes($notesDir, $dbPath);
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         Refresh
       </button>
+      <a href="index.php?lock=1" class="btn-lock" title="Lock Okum Vault">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+        Lock Vault
+      </a>
     </div>
   </header>
 
@@ -655,5 +874,150 @@ $allNotes = getOkumNotes($notesDir, $dbPath);
       selectNote(allNotes[0].id);
     }
   </script>
+<?php else: ?>
+  <!-- PIN Authentication Screen -->
+  <div class="pin-gate-container">
+    <div class="pin-card" id="pin-card-box">
+      <div class="pin-icon-wrap">
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          <circle cx="12" cy="16" r="1"></circle>
+        </svg>
+      </div>
+      <h2 class="pin-title">Okum Document Vault</h2>
+      <p class="pin-subtitle">> ENTER 4-DIGIT SECURITY PIN</p>
+
+      <div class="pin-dots" id="pin-dots-row">
+        <div class="pin-dot" id="dot-0"></div>
+        <div class="pin-dot" id="dot-1"></div>
+        <div class="pin-dot" id="dot-2"></div>
+        <div class="pin-dot" id="dot-3"></div>
+      </div>
+
+      <div class="pin-feedback" id="pin-feedback-msg">Awaiting Input...</div>
+
+      <div class="keypad-grid">
+        <button class="key-btn" onclick="pressPin('1')">1</button>
+        <button class="key-btn" onclick="pressPin('2')">2</button>
+        <button class="key-btn" onclick="pressPin('3')">3</button>
+        <button class="key-btn" onclick="pressPin('4')">4</button>
+        <button class="key-btn" onclick="pressPin('5')">5</button>
+        <button class="key-btn" onclick="pressPin('6')">6</button>
+        <button class="key-btn" onclick="pressPin('7')">7</button>
+        <button class="key-btn" onclick="pressPin('8')">8</button>
+        <button class="key-btn" onclick="pressPin('9')">9</button>
+        <button class="key-btn action-btn" onclick="clearPin()">CLR</button>
+        <button class="key-btn" onclick="pressPin('0')">0</button>
+        <button class="key-btn action-btn" onclick="backspacePin()">⌫</button>
+      </div>
+
+      <div class="pin-footer-links">
+        <a href="/" class="pin-back-link">← Return to Gateway</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentPin = '';
+    const dotsRow = document.getElementById('pin-dots-row');
+    const cardBox = document.getElementById('pin-card-box');
+    const feedback = document.getElementById('pin-feedback-msg');
+    let isSubmitting = false;
+
+    function updateDots() {
+      for (let i = 0; i < 4; i++) {
+        const dot = document.getElementById('dot-' + i);
+        if (dot) {
+          if (i < currentPin.length) {
+            dot.classList.add('filled');
+          } else {
+            dot.classList.remove('filled');
+          }
+        }
+      }
+    }
+
+    function pressPin(digit) {
+      if (isSubmitting || currentPin.length >= 4) return;
+      currentPin += digit;
+      updateDots();
+      feedback.textContent = 'Entering PIN (' + currentPin.length + '/4)...';
+      feedback.className = 'pin-feedback';
+
+      if (currentPin.length === 4) {
+        submitPin();
+      }
+    }
+
+    function clearPin() {
+      if (isSubmitting) return;
+      currentPin = '';
+      updateDots();
+      feedback.textContent = 'Awaiting Input...';
+      feedback.className = 'pin-feedback';
+    }
+
+    function backspacePin() {
+      if (isSubmitting || currentPin.length === 0) return;
+      currentPin = currentPin.slice(0, -1);
+      updateDots();
+      feedback.textContent = currentPin.length > 0 ? 'Entering PIN (' + currentPin.length + '/4)...' : 'Awaiting Input...';
+      feedback.className = 'pin-feedback';
+    }
+
+    function submitPin() {
+      if (isSubmitting) return;
+      isSubmitting = true;
+      feedback.textContent = 'VERIFYING CREDENTIALS...';
+      feedback.className = 'pin-feedback';
+
+      const formData = new URLSearchParams();
+      formData.append('action', 'verify_pin');
+      formData.append('pin', currentPin);
+
+      fetch('index.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formData.toString()
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.status === 'success') {
+          feedback.textContent = 'ACCESS GRANTED. UNLOCKING VAULT...';
+          feedback.className = 'pin-feedback success';
+          setTimeout(() => {
+            location.reload();
+          }, 350);
+        } else {
+          feedback.textContent = 'ACCESS DENIED. INCORRECT PIN.';
+          feedback.className = 'pin-feedback error';
+          cardBox.classList.add('shake');
+          setTimeout(() => {
+            cardBox.classList.remove('shake');
+            clearPin();
+            isSubmitting = false;
+          }, 600);
+        }
+      })
+      .catch(err => {
+        feedback.textContent = 'Error connecting to auth service';
+        feedback.className = 'pin-feedback error';
+        isSubmitting = false;
+      });
+    }
+
+    // Physical Keyboard Listener
+    window.addEventListener('keydown', (e) => {
+      if (e.key >= '0' && e.key <= '9') {
+        pressPin(e.key);
+      } else if (e.key === 'Backspace') {
+        backspacePin();
+      } else if (e.key === 'Escape' || e.key === 'c' || e.key === 'C') {
+        clearPin();
+      }
+    });
+  </script>
+<?php endif; ?>
 </body>
 </html>
