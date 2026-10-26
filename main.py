@@ -32,10 +32,10 @@ def create_tray_icon_pixmap():
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor(245, 158, 11))
+    painter.setBrush(QColor(99, 102, 241))
     painter.setPen(Qt.PenStyle.NoPen)
     painter.drawEllipse(2, 2, 28, 28)
-    painter.setBrush(QColor(254, 240, 138))
+    painter.setBrush(QColor(199, 210, 254))
     painter.drawEllipse(10, 10, 12, 12)
     painter.end()
     return pixmap
@@ -445,7 +445,7 @@ def main():
     print("Okum Native Linux Desktop Assistant is running!")
     print("- AI Engine: Groq Cloud AI active")
     print("- Voice Engine: Offline Vosk STT + Neural Female Voice TTS active")
-    print("- Mascot: Living Floating Orb (Solar Ember) active with 10s roam & bottom-left dock")
+    print("- Mascot: Living Floating Orb (Indigo base -> Warm Gold on music) active")
     print("- Music Engine: Smart multi-library & background watcher active")
     print("- Storage: SQLite & Markdown in ~/Documents/OkumNotes/")
 

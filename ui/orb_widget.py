@@ -97,7 +97,7 @@ class FloatingOrb(QWidget):
         # Voice Assistant & Music States
         self.voice_state = 'IDLE'  # 'IDLE', 'LISTENING', 'THINKING', 'SPEAKING'
         self.is_music_playing = False
-        self.music_indigo_progress = 0.0  # 0.0 = Gold, 1.0 = Calm Indigo
+        self.music_gold_progress = 0.0  # 0.0 = Base Indigo, 1.0 = Music Gold
 
         # Inactivity & Sleep
         self.is_sleeping = False
@@ -190,13 +190,13 @@ class FloatingOrb(QWidget):
         self.breathe_phase = (self.breathe_phase + 0.05) % (2 * math.pi)
         self.plasma_rot = (self.plasma_rot + 0.025) % (2 * math.pi)
 
-        # Smooth, calm color transition to Indigo when music is playing
-        target_indigo = 1.0 if self.is_music_playing else 0.0
-        diff_indigo = target_indigo - self.music_indigo_progress
-        if abs(diff_indigo) > 0.01:
-            self.music_indigo_progress += diff_indigo * 0.06
+        # Smooth, elegant color transition to Warm Gold when music is playing (Default is calm Indigo)
+        target_gold = 1.0 if self.is_music_playing else 0.0
+        diff_gold = target_gold - self.music_gold_progress
+        if abs(diff_gold) > 0.01:
+            self.music_gold_progress += diff_gold * 0.06
         else:
-            self.music_indigo_progress = target_indigo
+            self.music_gold_progress = target_gold
 
         # Check sleep timeout (only if idle, no music, not dragging)
         if (not self.is_sleeping and not self._is_dragging and 
@@ -453,10 +453,10 @@ class FloatingOrb(QWidget):
     def _show_context_menu(self, global_pos):
         """Preserves all critical right-click functions in a sleek menu."""
         menu = QMenu(self)
-        is_indigo = (self.music_indigo_progress > 0.5)
+        is_gold = (self.music_gold_progress > 0.5)
 
-        border_col = "rgba(99, 102, 241, 0.5)" if is_indigo else "rgba(245, 158, 11, 0.45)"
-        sel_col = "rgba(99, 102, 241, 0.35)" if is_indigo else "rgba(245, 158, 11, 0.35)"
+        border_col = "rgba(245, 158, 11, 0.5)" if is_gold else "rgba(99, 102, 241, 0.45)"
+        sel_col = "rgba(245, 158, 11, 0.35)" if is_gold else "rgba(99, 102, 241, 0.35)"
 
         menu.setStyleSheet(f"""
             QMenu {{
@@ -548,24 +548,24 @@ class FloatingOrb(QWidget):
             r = self.orb_radius * 0.88
 
         # --- Color Palettes ---
-        # 1. Base Solar Ember (Gold / Amber)
+        # 1. Base Indigo / Deep Violet (Default resting theme)
+        indigo_aura = QColor(99, 102, 241, int(105 * alpha_mult))    # Indigo-500
+        indigo_core = QColor(199, 210, 254, int(230 * alpha_mult))   # Indigo-200
+        indigo_mid  = QColor(99, 102, 241, int(185 * alpha_mult))
+        indigo_dark = QColor(67, 56, 202, int(115 * alpha_mult))     # Indigo-700
+
+        # 2. Warm Gold / Solar Amber (Active during music playback)
         gold_aura = QColor(245, 158, 11, int(105 * alpha_mult))
         gold_core = QColor(254, 240, 138, int(230 * alpha_mult))
         gold_mid  = QColor(245, 158, 11, int(190 * alpha_mult))
         gold_dark = QColor(217, 119, 6, int(115 * alpha_mult))
 
-        # 2. Calm Focused Indigo (Playing music without distraction)
-        indigo_aura = QColor(99, 102, 241, int(100 * alpha_mult))    # Indigo-500
-        indigo_core = QColor(199, 210, 254, int(220 * alpha_mult))   # Indigo-200
-        indigo_mid  = QColor(99, 102, 241, int(180 * alpha_mult))
-        indigo_dark = QColor(67, 56, 202, int(110 * alpha_mult))     # Indigo-700
-
-        # Interpolate based on music state
-        m_t = self.music_indigo_progress
-        idle_aura = lerp_color(gold_aura, indigo_aura, m_t)
-        idle_core = lerp_color(gold_core, indigo_core, m_t)
-        idle_mid  = lerp_color(gold_mid, indigo_mid, m_t)
-        idle_dark = lerp_color(gold_dark, indigo_dark, m_t)
+        # Interpolate based on music state (0.0 = Indigo, 1.0 = Gold)
+        m_t = self.music_gold_progress
+        idle_aura = lerp_color(indigo_aura, gold_aura, m_t)
+        idle_core = lerp_color(indigo_core, gold_core, m_t)
+        idle_mid  = lerp_color(indigo_mid, gold_mid, m_t)
+        idle_dark = lerp_color(indigo_dark, gold_dark, m_t)
 
         # Voice interaction overrides (temporary active states)
         if self.voice_state == 'LISTENING':
@@ -584,10 +584,10 @@ class FloatingOrb(QWidget):
             mid_col  = QColor(139, 92, 246, int(190 * alpha_mult))
             dark_col = QColor(109, 40, 217, int(115 * alpha_mult))
         elif self.is_sleeping:
-            aura_col = QColor(180, 83, 9, int(35 * alpha_mult))       # Dim ember
-            core_col = QColor(217, 119, 6, int(85 * alpha_mult))
-            mid_col  = QColor(180, 83, 9, int(70 * alpha_mult))
-            dark_col = QColor(120, 53, 15, int(50 * alpha_mult))
+            aura_col = QColor(67, 56, 202, int(35 * alpha_mult))      # Dim indigo slumber
+            core_col = QColor(99, 102, 241, int(85 * alpha_mult))
+            mid_col  = QColor(67, 56, 202, int(70 * alpha_mult))
+            dark_col = QColor(49, 46, 129, int(50 * alpha_mult))
         else:
             aura_col = idle_aura
             core_col = idle_core
@@ -614,9 +614,9 @@ class FloatingOrb(QWidget):
 
         # 3. TRANSLUCENT FROSTED BODY (Completely feathered edge - NO hard solid circle line)
         glass_grad = QRadialGradient(cx - r * 0.28, cy - r * 0.28, r * 1.25)
-        g_top = lerp_color(QColor(255, 237, 213, int(85 * alpha_mult)), QColor(224, 231, 255, int(85 * alpha_mult)), m_t)
-        g_mid = lerp_color(QColor(180, 83, 9, int(50 * alpha_mult)), QColor(67, 56, 202, int(50 * alpha_mult)), m_t)
-        g_edge = lerp_color(QColor(120, 53, 15, int(45 * alpha_mult)), QColor(49, 46, 129, int(45 * alpha_mult)), m_t)
+        g_top = lerp_color(QColor(224, 231, 255, int(85 * alpha_mult)), QColor(255, 237, 213, int(85 * alpha_mult)), m_t)
+        g_mid = lerp_color(QColor(67, 56, 202, int(50 * alpha_mult)), QColor(180, 83, 9, int(50 * alpha_mult)), m_t)
+        g_edge = lerp_color(QColor(49, 46, 129, int(45 * alpha_mult)), QColor(120, 53, 15, int(45 * alpha_mult)), m_t)
         glass_grad.setColorAt(0.0, g_top)
         glass_grad.setColorAt(0.58, g_mid)
         glass_grad.setColorAt(0.90, g_edge)
@@ -661,7 +661,7 @@ class FloatingOrb(QWidget):
         is_shuffle = bool(ms and getattr(ms, 'is_shuffle', False))
 
         prog = self.hover_progress
-        is_indigo = (self.music_indigo_progress > 0.5)
+        is_gold = (self.music_gold_progress > 0.5)
 
         for key, rect, _ in self._get_satellite_configs():
             is_hov = (self.hovered_satellite == key)
@@ -671,18 +671,18 @@ class FloatingOrb(QWidget):
             # Circular pill button background
             bg_grad = QRadialGradient(rect.center(), rect.width() / 2)
             if is_hov:
-                if is_indigo:
-                    bg_grad.setColorAt(0.0, QColor(99, 102, 241, btn_alpha))
-                    bg_grad.setColorAt(1.0, QColor(67, 56, 202, btn_alpha))
-                    border_pen = QPen(QColor(199, 210, 254, border_alpha), 1.5)
-                else:
+                if is_gold:
                     bg_grad.setColorAt(0.0, QColor(245, 158, 11, btn_alpha))
                     bg_grad.setColorAt(1.0, QColor(180, 83, 9, btn_alpha))
                     border_pen = QPen(QColor(254, 240, 138, border_alpha), 1.5)
+                else:
+                    bg_grad.setColorAt(0.0, QColor(99, 102, 241, btn_alpha))
+                    bg_grad.setColorAt(1.0, QColor(67, 56, 202, btn_alpha))
+                    border_pen = QPen(QColor(199, 210, 254, border_alpha), 1.5)
             else:
                 bg_grad.setColorAt(0.0, QColor(24, 18, 30, btn_alpha))
                 bg_grad.setColorAt(1.0, QColor(14, 10, 18, btn_alpha))
-                border_col = QColor(99, 102, 241, border_alpha) if is_indigo else QColor(245, 158, 11, border_alpha)
+                border_col = QColor(245, 158, 11, border_alpha) if is_gold else QColor(99, 102, 241, border_alpha)
                 border_pen = QPen(border_col, 1.1)
 
             painter.setPen(border_pen)
@@ -694,7 +694,7 @@ class FloatingOrb(QWidget):
             by = rect.center().y()
             icon_col = QColor(255, 255, 255, int(245 * prog))
             if key == 'shuffle' and is_shuffle and not is_hov:
-                icon_col = QColor(165, 180, 252, int(250 * prog)) if is_indigo else QColor(251, 191, 36, int(250 * prog))
+                icon_col = QColor(251, 191, 36, int(250 * prog)) if is_gold else QColor(165, 180, 252, int(250 * prog))
 
             painter.setPen(QPen(icon_col, 1.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
             painter.setBrush(QBrush(icon_col) if key in ('play', 'next', 'prev') else Qt.BrushStyle.NoBrush)
