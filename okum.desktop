@@ -1,9 +1,12 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Okum Assistant
-Comment=Personal OS-level offline assistant and floating notepad for mphatic
-Exec=env PYTHONPATH=/home/mphatic/Desktop/okum/venv/lib/python3.12/site-packages python3 /home/mphatic/Desktop/okum/main.py
-Icon=utilities-notes
+Name=Okum
+GenericName=Desktop Assistant & Music Player
+Comment=Personal living desktop assistant, notes, and music player
+Exec=/home/mphatic/Desktop/okum/main.py
+Icon=okum
 Terminal=false
-Categories=Utility;Application;
+Categories=Utility;AudioVideo;Audio;Player;Office;
+StartupNotify=true
+StartupWMClass=okum

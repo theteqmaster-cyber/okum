@@ -13,8 +13,9 @@ if os.path.isdir(venv_dir) and sys.prefix != venv_dir and os.path.exists(venv_py
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QAction, QRadialGradient
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+from PyQt6.QtMultimedia import QMediaPlayer
 
 from db.database import Database
 from ui.orb_widget import FloatingOrb
@@ -24,15 +25,18 @@ from ui.board_window import OkumBoardManager
 from ui.floating_music_window import FloatingMusicWindow
 
 def create_tray_icon_pixmap():
+    icon_path = os.path.join(os.path.dirname(__file__), 'styles', 'okum.png')
+    if os.path.exists(icon_path):
+        return QPixmap(icon_path).scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
     pixmap = QPixmap(32, 32)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor(99, 102, 241))
+    painter.setBrush(QColor(245, 158, 11))
     painter.setPen(Qt.PenStyle.NoPen)
     painter.drawEllipse(2, 2, 28, 28)
-    painter.setBrush(QColor(255, 255, 255))
-    painter.drawEllipse(12, 12, 8, 8)
+    painter.setBrush(QColor(254, 240, 138))
+    painter.drawEllipse(10, 10, 12, 12)
     painter.end()
     return pixmap
 
@@ -42,6 +46,10 @@ def main():
     app.setDesktopFileName("okum")
     app.setOrganizationName("okum")
     app.setQuitOnLastWindowClosed(False)
+
+    icon_path = os.path.join(os.path.dirname(__file__), 'styles', 'okum.png')
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
 
     # Load QSS Theme
     qss_path = os.path.join(os.path.dirname(__file__), 'styles', 'theme.qss')
